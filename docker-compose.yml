@@ -1,0 +1,8 @@
+services:
+  simulador:
+    build: .
+    image: simulador-cruce-vial
+    container_name: simulador-cruce-vial
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
