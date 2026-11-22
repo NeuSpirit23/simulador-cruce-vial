@@ -19,7 +19,8 @@ from reportlab.platypus import (Image, KeepTogether, PageBreak, Paragraph, Simpl
 
 from .datos import SEMAFOROS
 from .prediccion import ResultadoPrediccion, texto_horas_pico
-from .reportes import reporte_bloques, reporte_horas, reporte_semaforos, reporte_valle_pico
+from .reportes import (reporte_bloques, reporte_bloques_ciclos, reporte_horas, reporte_semaforos,
+                       reporte_valle_pico)
 
 MAX_FILAS_EXCEL = 1_000_000
 
@@ -34,7 +35,9 @@ NOMBRES = {
     "capacidad_ciclo": "Capacidad por verde", "llegadas": "Llegadas",
     "inicio": "Inicio del ciclo", "ciclo": "Ciclo", "U1": "U1", "U2": "U2",
     "en_espera": "En espera", "rezagados": "Rezagados", "capacidad": "Capacidad",
-    "quedan": "Quedan",
+    "quedan": "Quedan", "pasan_prom": "Pasan (prom. repeticiones)",
+    "quedan_prom": "Quedan (prom. repeticiones)", "llegadas_prom": "Llegadas (prom. repeticiones)",
+    "ciclos_txt": "Ciclos", "desde": "Desde", "hasta": "Hasta", "pct_del_semaforo": "% del semáforo",
 }
 for s in SEMAFOROS:
     NOMBRES[f"{s}_por_ciclo"] = f"{s} prom. por ciclo"
@@ -44,7 +47,7 @@ def _legible(df: pd.DataFrame) -> pd.DataFrame:
     return df.rename(columns=NOMBRES)
 
 
-def parametros(res: ResultadoPrediccion, horas_bloque: int) -> pd.DataFrame:
+def parametros(res: ResultadoPrediccion, horas_bloque: int, ciclos_bloque: int = 10) -> pd.DataFrame:
     e = res.escenario
     filas = [
         ("Desde", e.inicio.strftime("%d/%m/%Y %H:%M")),
@@ -55,6 +58,7 @@ def parametros(res: ResultadoPrediccion, horas_bloque: int) -> pd.DataFrame:
         ("Números pseudoaleatorios usados", res.numeros_usados),
         ("Demanda (× la observada)", e.factor_demanda),
         ("Bloques del reporte (horas)", horas_bloque),
+        ("Bloques del reporte (ciclos)", ciclos_bloque),
         ("Horas pico", texto_horas_pico()),
         ("Horas valle", "todas las demás"),
         ("Generador", "X(n+1) = 16807·X(n) mod 2147483647"),
@@ -89,10 +93,11 @@ def _escribir(writer, df, hoja, decimales=2):
     _formatear_hoja(writer.sheets[hoja])
 
 
-def excel_prediccion(res: ResultadoPrediccion, horas_bloque: int, campo: pd.DataFrame | None = None) -> bytes:
+def excel_prediccion(res: ResultadoPrediccion, horas_bloque: int, campo: pd.DataFrame | None = None,
+                     ciclos_bloque: int = 10) -> bytes:
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
-        _escribir(w, parametros(res, horas_bloque), "Parámetros")
+        _escribir(w, parametros(res, horas_bloque, ciclos_bloque), "Parámetros")
         _escribir(w, _legible(reporte_semaforos(res)), "Por semáforo")
         _escribir(w, _legible(reporte_valle_pico(res)), "Valle vs pico")
         _escribir(w, _legible(reporte_bloques(res, horas_bloque).drop(columns=["bloque_ini"])),
@@ -100,11 +105,15 @@ def excel_prediccion(res: ResultadoPrediccion, horas_bloque: int, campo: pd.Data
         horas = reporte_horas(res)
         horas["hora"] = horas["hora"].dt.strftime("%d/%m/%Y %H:%M")
         _escribir(w, _legible(horas), "Por hora")
-        ciclos = res.ciclos.copy()
+        bc = reporte_bloques_ciclos(res, ciclos_bloque)
+        bc["desde"] = bc["desde"].dt.strftime("%d/%m/%Y %H:%M")
+        bc["hasta"] = bc["hasta"].dt.strftime("%d/%m/%Y %H:%M")
+        _escribir(w, _legible(bc), f"Bloques de {ciclos_bloque} ciclos")
+        ciclos = res.ciclos.drop(columns=["pasan_var"]).copy()
         ciclos["inicio"] = ciclos["inicio"].dt.strftime("%d/%m/%Y %H:%M:%S")
         if len(ciclos) > MAX_FILAS_EXCEL:
             ciclos = ciclos.head(MAX_FILAS_EXCEL)
-        _escribir(w, _legible(ciclos), "Por ciclo (rep. 1)", decimales=5)
+        _escribir(w, _legible(ciclos), "Por ciclo", decimales=5)
         if campo is not None:
             _escribir(w, campo, "Datos de campo")
     return buf.getvalue()
@@ -157,7 +166,7 @@ def _grafico(fig) -> Image:
     return Image(buf, width=24 * cm, height=8 * cm)
 
 
-def pdf_prediccion(res: ResultadoPrediccion, horas_bloque: int) -> bytes:
+def pdf_prediccion(res: ResultadoPrediccion, horas_bloque: int, ciclos_bloque: int = 10) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=1.2 * cm, rightMargin=1.2 * cm,
                             topMargin=1.2 * cm, bottomMargin=1.2 * cm,
@@ -183,7 +192,7 @@ def pdf_prediccion(res: ResultadoPrediccion, horas_bloque: int) -> bytes:
     h.append(Spacer(1, 0.4 * cm))
 
     h.append(Paragraph("Parámetros", est["Heading2"]))
-    h.append(_tabla_pdf(parametros(res, horas_bloque), ancho * 0.7))
+    h.append(_tabla_pdf(parametros(res, horas_bloque, ciclos_bloque), ancho * 0.7))
 
     cols = ["semaforo", "ubicacion", "verde_s", "ciclo_s", "capacidad_ciclo", "ciclos", "pasan",
             "ic95", "pct_del_total", "prom_por_ciclo", "cola_prom"]
@@ -226,6 +235,22 @@ def pdf_prediccion(res: ResultadoPrediccion, horas_bloque: int) -> bytes:
                         ancho, max_filas=200))
     if len(horas) > 200:
         h.append(Paragraph("Se muestran las primeras 200 horas; el Excel tiene todas.", est["Italic"]))
+
+    h.append(PageBreak())
+    h.append(Paragraph(f"Vehículos que pasan por bloques de {ciclos_bloque} ciclos", est["Heading2"]))
+    bc = reporte_bloques_ciclos(res, ciclos_bloque)
+    fig, ax = plt.subplots(figsize=(12, 4))
+    for s in SEMAFOROS:
+        d = bc[bc["semaforo"] == s]
+        ax.plot(d["desde"], d["pasan"], label=s, marker="o" if len(d) < 60 else None)
+    ax.set_ylabel(f"Vehículos en {ciclos_bloque} ciclos")
+    ax.legend()
+    ax.grid(alpha=0.3)
+    fig.autofmt_xdate()
+    h.append(_grafico(fig))
+    h.append(_tabla_pdf(_legible(bc), ancho, max_filas=200))
+    if len(bc) > 200:
+        h.append(Paragraph("Se muestran los primeros 200 bloques; el Excel tiene todos.", est["Italic"]))
 
     doc.build(h)
     return buf.getvalue()

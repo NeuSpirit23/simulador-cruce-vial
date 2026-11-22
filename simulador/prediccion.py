@@ -42,6 +42,7 @@ class EscenarioPrediccion:
     semilla: int = 12345
     factor_demanda: float = 1.0
     verdes: dict | None = None
+    ciclos_por_semaforo: int | None = None   # si se da, se simulan exactamente estos ciclos
 
 
 @dataclass
@@ -53,13 +54,44 @@ class ResultadoPrediccion:
     info_semaforos: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
+def ciclos_de(sem: DatosSemaforo, esc: EscenarioPrediccion, s: str) -> tuple[int, int]:
+    """(duración del ciclo en s, cantidad de ciclos) de un semáforo en el escenario."""
+    verde = (esc.verdes or {}).get(s, sem.verde)
+    ciclo = verde + sem.rojo
+    if esc.ciclos_por_semaforo:
+        return ciclo, int(esc.ciclos_por_semaforo)
+    return ciclo, int((esc.fin - esc.inicio).total_seconds() // ciclo)
+
+
 def ciclos_estimados(semaforos: dict[str, DatosSemaforo], esc: EscenarioPrediccion) -> int:
-    seg = (esc.fin - esc.inicio).total_seconds()
-    total = 0
-    for s, sem in semaforos.items():
-        verde = (esc.verdes or {}).get(s, sem.verde)
-        total += int(seg // (verde + sem.rojo))
-    return total * esc.repeticiones
+    return sum(ciclos_de(sem, esc, s)[1] for s, sem in semaforos.items()) * esc.repeticiones
+
+
+def fin_por_ciclos(semaforos: dict[str, DatosSemaforo], inicio: datetime, ciclos: int,
+                   verdes: dict | None = None) -> datetime:
+    """Hora en que termina el último de los N ciclos del semáforo con el ciclo más largo."""
+    mayor = max((verdes or {}).get(s, sem.verde) + sem.rojo for s, sem in semaforos.items())
+    return inicio + pd.Timedelta(seconds=mayor * ciclos).to_pytimedelta()
+
+
+def ciclos_por_numeros(numeros: int, repeticiones: int, n_semaforos: int = 4) -> int:
+    """Cada ciclo usa 2 números (U1 y U2): ciclos = N ÷ (2 · semáforos · repeticiones)."""
+    return numeros // (2 * n_semaforos * repeticiones)
+
+
+def cubre_valle_y_pico(inicio: datetime, fin: datetime) -> tuple[bool, bool]:
+    """¿El rango toca al menos una hora pico y al menos una hora valle?"""
+    hay_pico = hay_valle = False
+    t = inicio.replace(minute=0, second=0, microsecond=0)
+    while t < fin and not (hay_pico and hay_valle):
+        tramo_ini, tramo_fin = max(t, inicio), min(t + pd.Timedelta(hours=1), fin)
+        if tramo_fin > tramo_ini:
+            if periodo_de_hora(t.hour) == "Pico":
+                hay_pico = True
+            else:
+                hay_valle = True
+        t += pd.Timedelta(hours=1)
+    return hay_valle, hay_pico
 
 
 def _tablas(valores: list[int]):
@@ -73,6 +105,8 @@ def _sortear_vector(valores, hastas, u):
 
 
 def predecir(semaforos: dict[str, DatosSemaforo], esc: EscenarioPrediccion) -> ResultadoPrediccion:
+    if esc.ciclos_por_semaforo:
+        esc.fin = fin_por_ciclos(semaforos, esc.inicio, esc.ciclos_por_semaforo, esc.verdes)
     if esc.fin <= esc.inicio:
         raise ValueError("La fecha y hora final debe ser posterior a la inicial.")
     if ciclos_estimados(semaforos, esc) > MAX_CICLOS_TOTALES:
@@ -88,6 +122,7 @@ def predecir(semaforos: dict[str, DatosSemaforo], esc: EscenarioPrediccion) -> R
     for s, sem in semaforos.items():
         tablas[s] = {p: (_tablas(sem.llegadas[p]), _tablas(sem.quedan[p])) for p in ("Valle", "Pico")}
 
+    acumulado = {}      # semáforo -> sumas por ciclo entre repeticiones
     filas_detalle = []
     filas_horas = []
     info = []
@@ -97,8 +132,7 @@ def predecir(semaforos: dict[str, DatosSemaforo], esc: EscenarioPrediccion) -> R
         for s, sem in semaforos.items():
             verde = (esc.verdes or {}).get(s, sem.verde)
             cap = capacidad_con_verde(sem, verde)
-            ciclo = verde + sem.rojo
-            n = int(segundos_total // ciclo)
+            ciclo, n = ciclos_de(sem, esc, s)
             if n == 0:
                 continue
             if rep == 1:
@@ -146,6 +180,13 @@ def predecir(semaforos: dict[str, DatosSemaforo], esc: EscenarioPrediccion) -> R
                 "cola_suma": np.bincount(inv, weights=quedan),
             }))
 
+            acc = acumulado.setdefault(s, {"pasan": np.zeros(n), "pasan2": np.zeros(n),
+                                          "quedan": np.zeros(n), "llegadas": np.zeros(n)})
+            acc["pasan"] += pasan
+            acc["pasan2"] += pasan.astype(float) ** 2
+            acc["quedan"] += quedan
+            acc["llegadas"] += lleg
+
             if rep == 1:
                 filas_detalle.append(pd.DataFrame({
                     "semaforo": s, "ciclo": k + 1,
@@ -157,5 +198,16 @@ def predecir(semaforos: dict[str, DatosSemaforo], esc: EscenarioPrediccion) -> R
 
     horas = pd.concat(filas_horas, ignore_index=True)
     horas["cola_prom"] = horas["cola_suma"] / horas["ciclos"]
-    return ResultadoPrediccion(esc, pd.concat(filas_detalle, ignore_index=True), horas,
-                               usados, pd.DataFrame(info))
+
+    # Promedio de cada ciclo entre las R repeticiones
+    ciclos = pd.concat(filas_detalle, ignore_index=True)
+    r = esc.repeticiones
+    prom = []
+    for s, acc in acumulado.items():
+        media = acc["pasan"] / r
+        var = (acc["pasan2"] - r * media ** 2) / (r - 1) if r > 1 else np.zeros_like(media)
+        prom.append(pd.DataFrame({"semaforo": s, "ciclo": np.arange(1, len(media) + 1),
+                                  "pasan_prom": media, "pasan_var": np.maximum(var, 0),
+                                  "quedan_prom": acc["quedan"] / r, "llegadas_prom": acc["llegadas"] / r}))
+    ciclos = ciclos.merge(pd.concat(prom, ignore_index=True), on=["semaforo", "ciclo"])
+    return ResultadoPrediccion(esc, ciclos, horas, usados, pd.DataFrame(info))

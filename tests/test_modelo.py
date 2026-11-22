@@ -61,3 +61,25 @@ def test_prediccion_por_fechas_y_reportes():
     assert vp.loc["Pico", "prom_por_hora"] > vp.loc["Valle", "prom_por_hora"]
     assert excel_prediccion(res, 2)[:2] == b"PK"
     assert pdf_prediccion(res, 2)[:4] == b"%PDF"
+
+
+def test_modos_y_restriccion_valle_pico():
+    from datetime import datetime
+
+    from simulador.exportar import excel_prediccion, pdf_prediccion
+    from simulador.prediccion import (EscenarioPrediccion, ciclos_por_numeros, cubre_valle_y_pico,
+                                      predecir)
+    from simulador.reportes import reporte_bloques_ciclos
+
+    assert cubre_valle_y_pico(datetime(2026, 1, 1, 6), datetime(2026, 1, 1, 11)) == (True, False)
+    assert cubre_valle_y_pico(datetime(2026, 1, 1, 11), datetime(2026, 1, 1, 13)) == (True, True)
+    assert ciclos_por_numeros(80_000, 10) == 1000
+
+    sem = cargar_semaforos()
+    res = predecir(sem, EscenarioPrediccion(datetime(2026, 1, 1, 11), datetime(2026, 1, 1, 11),
+                                            repeticiones=3, ciclos_por_semaforo=60))
+    assert (res.info_semaforos["ciclos"] == 60).all()
+    bc = reporte_bloques_ciclos(res, 10)
+    assert len(bc) == 24 and abs(bc.groupby("semaforo")["pct_del_semaforo"].sum() - 100).max() < 1e-6
+    assert excel_prediccion(res, 2, ciclos_bloque=10)[:2] == b"PK"
+    assert pdf_prediccion(res, 2, 10)[:4] == b"%PDF"

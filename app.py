@@ -18,10 +18,11 @@ from simulador.generador import GeneradorCongruencial
 from simulador.mapa import CENTRO_DEFECTO, POSICIONES_DEFECTO, enlaces_google, html_mapa
 from simulador.modelo import Escenario, barrido_demanda, simular, tabla_intervalos
 from simulador.prediccion import (EscenarioPrediccion, MAX_CICLOS_TOTALES, ciclos_estimados,
-                                  predecir, texto_horas_pico)
+                                  ciclos_por_numeros, cubre_valle_y_pico, fin_por_ciclos, predecir,
+                                  texto_horas_pico)
 from simulador.pruebas import prueba_frecuencias, prueba_ks, prueba_promedios
-from simulador.reportes import (reporte_bloques, reporte_horas, reporte_semaforos,
-                                reporte_valle_pico)
+from simulador.reportes import (reporte_bloques, reporte_bloques_ciclos, reporte_horas,
+                                reporte_semaforos, reporte_valle_pico)
 
 st.set_page_config(page_title="Simulador cruce vial", page_icon="🚦", layout="wide")
 
@@ -46,15 +47,25 @@ def legible(df):
 # Barra lateral: periodo a predecir
 # ---------------------------------------------------------------------------
 st.sidebar.title("🚦 Predicción")
+modo = st.sidebar.radio("Definir la simulación por", ["Fechas y horas", "Cantidad de ciclos",
+                                                      "Cantidad de números pseudoaleatorios"])
 with st.sidebar.form("parametros"):
-    st.markdown("**Periodo a predecir**")
     hoy = date.today()
+    st.markdown("**Periodo a predecir**")
     c1, c2 = st.columns(2)
     f_ini = c1.date_input("Desde el día", hoy, format="DD/MM/YYYY")
     h_ini = c2.time_input("a las", time(6, 0), step=timedelta(minutes=30))
-    c1, c2 = st.columns(2)
-    f_fin = c1.date_input("Hasta el día", hoy, format="DD/MM/YYYY")
-    h_fin = c2.time_input("a las ", time(20, 0), step=timedelta(minutes=30))
+    n_ciclos = n_numeros = None
+    if modo == "Fechas y horas":
+        c1, c2 = st.columns(2)
+        f_fin = c1.date_input("Hasta el día", hoy, format="DD/MM/YYYY")
+        h_fin = c2.time_input("a las ", time(20, 0), step=timedelta(minutes=30))
+    elif modo == "Cantidad de ciclos":
+        n_ciclos = st.number_input("Ciclos por semáforo", 10, 2_000_000, 500, step=50,
+                                   help="Cuántas veces se repite verde → rojo en cada semáforo")
+    else:
+        n_numeros = st.number_input("Números pseudoaleatorios a generar", 1_000, 50_000_000, 100_000, step=10_000,
+                                    help="Cada ciclo de cada semáforo usa 2 números (U1 y U2)")
 
     st.markdown("**Números pseudoaleatorios**")
     repeticiones = st.number_input("Repeticiones de la simulación", 1, 200, 10,
@@ -65,21 +76,41 @@ with st.sidebar.form("parametros"):
     st.markdown("**Escenario**")
     factor = st.slider("Demanda (1.0 = la observada)", 0.5, 3.0, 1.0, step=0.1,
                        help="1.2 significa que llegan 20 % más carros que en la toma de datos")
-    with st.expander("Tiempo en verde de cada semáforo"):
-        verdes = {s: st.number_input(f"{s} – {semaforos[s].ubicacion} (s)", 5, 120, semaforos[s].verde, step=1)
-                  for s in SEMAFOROS}
-        st.caption("Rojo: 99 s en los cuatro semáforos.")
     simular_btn = st.form_submit_button("▶ Simular", type="primary", use_container_width=True)
 
-st.sidebar.caption(f"Horas pico (fijas): {texto_horas_pico()}. El resto del día es hora valle.")
+st.sidebar.markdown("**Restricciones fijas del cruce**")
+st.sidebar.dataframe(pd.DataFrame([{"Semáforo": f"{s} {semaforos[s].ubicacion}", "Verde": f"{semaforos[s].verde} s",
+                                    "Rojo": f"{semaforos[s].rojo} s"} for s in SEMAFOROS]),
+                     hide_index=True, use_container_width=True)
+st.sidebar.caption(f"Horas pico (fijas): {texto_horas_pico()}. El resto del día es hora valle. "
+                   "Toda simulación debe incluir horas valle y horas pico.")
 
+verdes = None
 inicio = datetime.combine(f_ini, h_ini)
-fin = datetime.combine(f_fin, h_fin)
-esc = EscenarioPrediccion(inicio, fin, int(repeticiones), int(semilla), factor, verdes)
+ciclos_fijos = None
+if modo == "Fechas y horas":
+    fin = datetime.combine(f_fin, h_fin)
+elif modo == "Cantidad de ciclos":
+    ciclos_fijos = int(n_ciclos)
+else:
+    ciclos_fijos = ciclos_por_numeros(int(n_numeros), int(repeticiones))
+    if ciclos_fijos < 1:
+        st.sidebar.error("Con esa cantidad de números no alcanza para un ciclo. Suba los números o baje las repeticiones.")
+        st.stop()
+if ciclos_fijos:
+    fin = fin_por_ciclos(semaforos, inicio, ciclos_fijos)
+esc = EscenarioPrediccion(inicio, fin, int(repeticiones), int(semilla), factor, verdes, ciclos_fijos)
 
 if simular_btn or "resultado" not in st.session_state:
     if fin <= inicio:
         st.sidebar.error("La fecha y hora final debe ser posterior a la inicial.")
+        st.stop()
+    hay_valle, hay_pico = cubre_valle_y_pico(inicio, fin)
+    if not (hay_valle and hay_pico):
+        falta = "ninguna hora pico" if not hay_pico else "ninguna hora valle"
+        st.error(f"El periodo del {inicio:%d/%m/%Y %H:%M} al {fin:%d/%m/%Y %H:%M} no incluye {falta}. "
+                 f"Toda simulación debe tener horas valle y horas pico (pico: {texto_horas_pico()}). "
+                 "Amplíe el periodo, por ejemplo de 10:00 a 14:00.")
         st.stop()
     est = ciclos_estimados(semaforos, esc)
     if est > MAX_CICLOS_TOTALES:
@@ -165,9 +196,24 @@ with tabs[1]:
     st.dataframe(legible(h).style.format(precision=1, thousands=".", decimal=",").format({"Hora": "{:%d/%m/%Y %H:%M}"}),
                  use_container_width=True, hide_index=True)
 
-    st.markdown("#### Por ciclo (repetición 1)")
+    st.markdown("#### Por bloques de ciclos")
+    ciclos_bloque = st.select_slider("Ciclos por bloque", [5, 10, 20, 30, 50, 100, 250, 500, 1000], value=10)
+    bc = reporte_bloques_ciclos(res, ciclos_bloque)
+    st.caption(f"Cada fila suma los vehículos que pasan en {ciclos_bloque} ciclos seguidos de un semáforo "
+               "(promedio de las repeticiones).")
+    fig = px.line(bc, x="desde", y="pasan", color="semaforo", markers=len(bc) < 200,
+                  labels={"desde": "Inicio del bloque", "pasan": f"Vehículos en {ciclos_bloque} ciclos",
+                          "semaforo": "Semáforo"})
+    st.plotly_chart(fig, use_container_width=True)
+    st.dataframe(legible(bc).style.format(precision=1, thousands=".", decimal=",")
+                 .format({"Desde": "{:%d/%m/%Y %H:%M}", "Hasta": "{:%d/%m/%Y %H:%M}"}),
+                 use_container_width=True, hide_index=True)
+
+    st.markdown("#### Por ciclo")
+    st.caption("Detalle de la repetición 1 (U1, U2, llegadas, cola…) y, al final, el promedio de cada ciclo "
+               "entre todas las repeticiones.")
     s_sel = st.selectbox("Semáforo", SEMAFOROS, format_func=lambda s: f"{s} – {semaforos[s].ubicacion}")
-    det = res.ciclos[res.ciclos["semaforo"] == s_sel]
+    det = res.ciclos[res.ciclos["semaforo"] == s_sel].drop(columns=["pasan_var"])
     st.dataframe(legible(det.head(5000)).style.format(precision=4).format({"Inicio del ciclo": "{:%d/%m/%Y %H:%M:%S}"}),
                  use_container_width=True, hide_index=True)
     if len(det) > 5000:
@@ -177,10 +223,10 @@ with tabs[1]:
     c1, c2 = st.columns(2)
     nombre = f"prediccion_{e.inicio:%Y%m%d_%H%M}_{e.fin:%Y%m%d_%H%M}"
     with st.spinner("Preparando archivos…"):
-        c1.download_button("⬇ Excel (todas las tablas)", excel_prediccion(res, horas_bloque, campo),
+        c1.download_button("⬇ Excel (todas las tablas)", excel_prediccion(res, horas_bloque, campo, ciclos_bloque),
                            f"{nombre}.xlsx", use_container_width=True,
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        c2.download_button("⬇ PDF (reporte)", pdf_prediccion(res, horas_bloque), f"{nombre}.pdf",
+        c2.download_button("⬇ PDF (reporte)", pdf_prediccion(res, horas_bloque, ciclos_bloque), f"{nombre}.pdf",
                            mime="application/pdf", use_container_width=True)
 
 # ---------------------------------------------------------------------------
@@ -230,7 +276,7 @@ with tabs[2]:
 with tabs[3]:
     periodo_cap = st.radio("Hora", PERIODOS, horizontal=True, key="periodo_cap")
     _, resumen = simular(semaforos, Escenario(periodo=periodo_cap, ciclos=500, semilla=int(semilla),
-                                              factor_demanda=factor, verdes=verdes))
+                                              factor_demanda=factor))
     st.markdown("**¿Cuántos vehículos puede atender el cruce sin problema?** Se repite la simulación "
                 "aumentando la demanda poco a poco y se mira en qué punto la cola deja de despejarse.")
     tabla = resumen[["semaforo", "ubicacion", "capacidad_ciclo", "ciclo_s", "capacidad_hora",
@@ -331,8 +377,9 @@ with tabs[6]:
 # ---------------------------------------------------------------------------
 with tabs[7]:
     st.markdown(f"""
-**Periodo.** Se escoge desde qué día y hora hasta qué día y hora predecir. Cada ciclo de cada semáforo se
-ubica en el reloj: si empieza en hora pico ({texto_horas_pico()}) se usan los datos de hora pico; si no,
+**Periodo.** Se define por fechas y horas, por cantidad de ciclos o por cantidad de números pseudoaleatorios
+(cada ciclo usa 2: `ciclos por semáforo = números ÷ (2 × 4 × repeticiones)`). Toda simulación debe incluir horas
+valle y horas pico. Los semáforos y sus tiempos son fijos. Cada ciclo de cada semáforo se ubica en el reloj: si empieza en hora pico ({texto_horas_pico()}) se usan los datos de hora pico; si no,
 los de hora valle.
 
 **En cada ciclo y para cada semáforo:**

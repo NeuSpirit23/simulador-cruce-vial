@@ -38,14 +38,20 @@ streamlit run app.py
 
 ## Qué tiene la aplicación
 
-En la barra lateral se escoge **desde qué día y hora hasta qué día y hora** se quiere predecir, cuántas **repeticiones** se hacen con números pseudoaleatorios distintos, la **semilla**, el nivel de demanda y el tiempo en verde de cada semáforo. Después se da clic en **Simular**.
+En la barra lateral se define la simulación de una de tres formas:
 
-**Horas pico (fijas):** 12:00–13:00 y 17:00–18:00, que son las que se midieron en campo. El resto del día es hora valle.
+- **Fechas y horas:** desde qué día y hora hasta qué día y hora.
+- **Cantidad de ciclos:** desde qué día y hora, y cuántos ciclos (verde → rojo) por semáforo.
+- **Cantidad de números pseudoaleatorios:** desde qué día y hora, y cuántos números generar. Cada ciclo usa 2 (U1 y U2), así que `ciclos por semáforo = números ÷ (2 × 4 semáforos × repeticiones)`.
+
+También se escogen las **repeticiones**, la **semilla** y el nivel de demanda, y luego se da clic en **Simular**.
+
+**Restricciones fijas:** los 4 semáforos con sus tiempos (verde 25/30/25/35 s y rojo 99 s) y las **horas pico** 12:00–13:00 y 17:00–18:00, que son las medidas en campo. El resto del día es hora valle. **Toda simulación debe incluir horas valle y horas pico**; si el periodo no las tiene, el programa avisa y no simula. El límite es de 4 millones de ciclos en total (ciclos × semáforos × repeticiones), por ejemplo un año completo con 3 repeticiones.
 
 | Pestaña | Qué muestra |
 |---|---|
 | **Predicción** | Total de vehículos que pasan con su margen (IC 95 %), los resultados por semáforo, la comparación valle frente a pico y la gráfica por hora. |
-| **Reportes** | Bloques de horas ajustables (2 h por defecto: 00–02, 02–04…) con cuántos pasan, el % del total y cuántos pasan en horas valle y en horas pico. También tablas por hora y por ciclo. Se descargan en **Excel** y en **PDF**. |
+| **Reportes** | Bloques de horas ajustables (2 h por defecto: 00–02, 02–04…) con cuántos pasan, el % del total y cuántos pasan en horas valle y en horas pico. Bloques de ciclos ajustables (10 por defecto: ciclos 1–10, 11–20…). Tablas por hora y por ciclo. Todo se descarga en **Excel** y en **PDF**. |
 | **Mapa en vivo** | Mapa satelital del cruce con la animación de los carros en cola y los que pasan, ciclo por ciclo y semáforo por semáforo. |
 | **¿Cuánto aguanta el cruce?** | La capacidad en vehículos por hora y hasta cuánto puede crecer la demanda antes de saturarse. |
 | **Validación** | Compara lo simulado con lo observado usando el error del método de los 11 pasos. |
