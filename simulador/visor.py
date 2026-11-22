@@ -297,28 +297,59 @@ try {
     const q = enLinea(s.entrada, L, Math.min(s.pare + 3.5, fin - 2)); const dir = [Math.sin(rad(q.rumbo)), Math.cos(rad(q.rumbo))], n = der(dir);
     for (let i = -4; i <= 4; i++){ const c = [q.p[0] + n[0]*i*1.1 - n[0]*2.6, q.p[1] + n[1]*i*1.1 - n[1]*2.6];
       franja([c[0] - dir[0]*1.5, c[1] - dir[1]*1.5], [c[0] + dir[0]*1.5, c[1] + dir[1]*1.5], 0.6, 0.06, blanca); } });
-  // negocios de referencia (los que aparecen en el mapa)
-  D.referencias.forEach(r => {
-    const h = 5 + (r.nombre.length % 3);
-    const b = new THREE.Mesh(new THREE.BoxGeometry(11, h, 11), mat(0xece6db)); b.position.copy(P(r.p[0], r.p[1])); b.position.y = h/2;
-    b.castShadow = b.receiveShadow = true; escena.add(b);
-    const techo = new THREE.Mesh(new THREE.BoxGeometry(11.4, 0.6, 11.4), mat(new THREE.Color(r.color).getHex()));
-    techo.position.copy(b.position); techo.position.y = h + 0.3; escena.add(techo);
-    letrero(r.nombre, r.p, h + 3.2, 13, r.color);
-  });
-  // edificios genéricos fuera de las vías (siempre iguales)
-  let sx = 7;  const rnd = () => (sx = (16807*sx) % 2147483647) / 2147483647;
-  const libre = (x, y, radio) => D.vias.every(v => { for (let i = 1; i < v.pts.length; i++)
-      if (distSeg([x, y], v.pts[i-1], v.pts[i]) < v.ancho/2 + 3 + radio) return false; return true; })
-    && D.referencias.every(r => Math.hypot(x - r.p[0], y - r.p[1]) > 10 + radio);
-  const tonos = [0xe8e1d5, 0xd9cbb4, 0xc7d0d9, 0xe3d3c3, 0xb8c4b1, 0xf0e6da];
-  for (let i = 0; i < 420; i++){
-    const x = (rnd()-0.5)*320, y = (rnd()-0.5)*300, w = 7 + rnd()*12, d = 7 + rnd()*12;
-    if (!libre(x, y, Math.max(w, d)/2)) continue;
-    const h = 3 + Math.pow(rnd(), 2.2)*14;
-    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(tonos[Math.floor(rnd()*tonos.length)]));
-    b.position.copy(P(x, y)); b.position.y = h/2; b.castShadow = b.receiveShadow = true; escena.add(b);
+  // --- ubicación de edificios: nunca encima de la vía ni del andén --------------------------------
+  const MARGEN_ANDEN = 2.1 + 0.8;                 // andén (2,1 m) + 0,8 m de antejardín
+  function viaCercana(p){
+    let mejor = {d: 1e9};
+    D.vias.forEach(v => { for (let i = 1; i < v.pts.length; i++){ const a = v.pts[i-1], b = v.pts[i];
+      const d = distSeg(p, a, b) - v.ancho/2; if (d < mejor.d){ const ab = sub(b, a), L = lon(ab) || 1;
+        mejor = {d, dir:[ab[0]/L, ab[1]/L], a, b}; } } });
+    return mejor;
   }
+  function esquinas(c, w, d, ang){                 // ang = rumbo (rad) del lado largo "d"
+    const al = [Math.sin(ang), Math.cos(ang)], pe = [Math.cos(ang), -Math.sin(ang)];
+    const out = [c];
+    [[1,1],[1,-1],[-1,1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]].forEach(([i, j]) =>
+      out.push([c[0] + al[0]*i*d/2 + pe[0]*j*w/2, c[1] + al[1]*i*d/2 + pe[1]*j*w/2]));
+    return out;
+  }
+  const fueraDeVias = (c, w, d, ang) => esquinas(c, w, d, ang).every(q => D.vias.every(v => {
+    for (let i = 1; i < v.pts.length; i++) if (distSeg(q, v.pts[i-1], v.pts[i]) < v.ancho/2 + MARGEN_ANDEN) return false;
+    return true; }));
+  const ocupados = [];                             // círculos de lo ya construido
+  const libreDeOtros = (c, radio) => ocupados.every(o => Math.hypot(c[0]-o[0], c[1]-o[1]) > o[2] + radio + 1.2);
+  function edificio(c, w, d, h, ang, color){
+    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color));
+    b.position.copy(P(c[0], c[1])); b.position.y = h/2; b.rotation.y = -ang; b.castShadow = b.receiveShadow = true; escena.add(b);
+    ocupados.push([c[0], c[1], Math.hypot(w, d)/2]); return b;
+  }
+  // negocios de referencia (los que aparecen en el mapa): se alinean con su vía y se corren hacia
+  // adentro de la manzana hasta que quedan detrás del andén
+  D.referencias.forEach(r => {
+    const w = 10, d = 10, h = 5 + (r.nombre.length % 3);
+    let c = [r.p[0], r.p[1]];
+    const vc = viaCercana(c), ang = Math.atan2(vc.dir[0], vc.dir[1]);
+    const ab = sub(vc.b, vc.a), t = Math.max(0, Math.min(1, ((c[0]-vc.a[0])*ab[0] + (c[1]-vc.a[1])*ab[1]) / ((ab[0]**2 + ab[1]**2) || 1)));
+    const pie = [vc.a[0] + ab[0]*t, vc.a[1] + ab[1]*t];
+    let nrm = sub(c, pie); const nl = lon(nrm) || 1; nrm = [nrm[0]/nl, nrm[1]/nl];
+    for (let k = 0; k < 80 && !(fueraDeVias(c, w, d, ang) && libreDeOtros(c, Math.hypot(w, d)/2)); k++) c = [c[0] + nrm[0]*0.5, c[1] + nrm[1]*0.5];
+    edificio(c, w, d, h, ang, 0xece6db);
+    const techo = new THREE.Mesh(new THREE.BoxGeometry(w + 0.4, 0.6, d + 0.4), mat(new THREE.Color(r.color).getHex()));
+    techo.position.copy(P(c[0], c[1])); techo.position.y = h + 0.3; techo.rotation.y = -ang; escena.add(techo);
+    letrero(r.nombre, c, h + 3.2, 13, r.color);
+  });
+  // edificios genéricos: alineados con la vía más cercana, detrás del andén y sin chocar entre sí
+  let sx = 7;  const rnd = () => (sx = (16807*sx) % 2147483647) / 2147483647;
+  const tonos = [0xe8e1d5, 0xd9cbb4, 0xc7d0d9, 0xe3d3c3, 0xb8c4b1, 0xf0e6da];
+  for (let i = 0; i < 900 && ocupados.length < 230; i++){
+    const c = [(rnd()-0.5)*320, (rnd()-0.5)*300], w = 7 + rnd()*10, d = 7 + rnd()*12;
+    const vc = viaCercana(c); if (vc.d > 60) continue;
+    const ang = Math.atan2(vc.dir[0], vc.dir[1]);
+    if (!fueraDeVias(c, w, d, ang) || !libreDeOtros(c, Math.hypot(w, d)/2)) continue;
+    edificio(c, w, d, 3 + Math.pow(rnd(), 2.2)*14, ang, tonos[Math.floor(rnd()*tonos.length)]);
+  }
+  const libre = (x, y, radio) => fueraDeVias([x, y], radio*2, radio*2, 0) && libreDeOtros([x, y], radio);
+
   // árboles
   for (let i = 0; i < 160; i++){ const x = (rnd()-0.5)*300, y = (rnd()-0.5)*280; if (!libre(x, y, 2.5)) continue;
     const tr = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.3, 2.5), mat(0x6b4f2a)); tr.position.copy(P(x, y)); tr.position.y = 1.25; escena.add(tr);

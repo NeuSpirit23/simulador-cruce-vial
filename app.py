@@ -5,6 +5,7 @@ Ejecutar:  streamlit run app.py
 
 from datetime import date, datetime, time, timedelta
 
+import math
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -281,6 +282,82 @@ def grafico_horas(clave):
 
 descargas("global")
 
+# --- Panel para llegar al 1 % de error ------------------------------------------------------------
+_prec = T["Precisión"]
+_err_max = float(np.nanmax(_prec["Error relativo (%)"])) if _prec["Error relativo (%)"].notna().any() else float("nan")
+_rep_nec = int(np.nanmax(_prec["Repeticiones para error ≤ 1 %"])) if _prec["Repeticiones para error ≤ 1 %"].notna().any() else 2
+_cumple_todo = bool((_prec["¿Cumple ≤ 1 %?"] == "Sí").all())
+# El error relativo baja como 1/√(ciclos): para pasar de e % a 1 % hacen falta (e/1)² veces los ciclos actuales
+_ciclos_nec = int(min(MAX_CICLOS_TOTALES // max(1, repeticiones),
+                      math.ceil(K["Ciclos"] * (max(_err_max, 1.0) / 0.95) ** 2))) if _err_max == _err_max else K["Ciclos"]
+
+
+def _ajustar_repeticiones():
+    """Sube las repeticiones con R = (Z·s ÷ (0,01·x̄))² y comprueba simulando, porque s cambia al repetir más."""
+    from simulador.paquete import precision
+    r_ = int(min(max(_rep_nec, repeticiones), 200))
+    for _ in range(6):
+        if ciclos_estimados(semaforos, EscenarioPrediccion(inicio, fin, r_, semilla, factor)) > MAX_CICLOS_TOTALES:
+            break
+        tabla_p, _ = precision(correr(inicio, fin, r_, semilla, factor))
+        if (tabla_p["¿Cumple ≤ 1 %?"] == "Sí").all() or r_ >= 200:
+            break
+        r_ = int(min(200, max(r_ + 2, np.nanmax(tabla_p["Repeticiones para error ≤ 1 %"]) * 1.1)))
+    st.session_state.repeticiones = r_
+    _desde_periodo()
+
+
+def _ajustar_ciclos():
+    """Busca los ciclos necesarios simulando: estima con (error ÷ 1 %)² y comprueba hasta que todo cumpla."""
+    from simulador.paquete import precision
+    c = int(_ciclos_nec)
+    for _ in range(6):
+        fin_c = inicio + timedelta(seconds=segundos_para(c))
+        esc_c = EscenarioPrediccion(inicio, fin_c, repeticiones, semilla, factor)
+        if ciclos_estimados(semaforos, esc_c) > MAX_CICLOS_TOTALES:
+            break
+        tabla_p, _ = precision(correr(inicio, fin_c, repeticiones, semilla, factor))
+        e = float(np.nanmax(tabla_p["Error relativo (%)"]))
+        if e <= 1:
+            break
+        c = int(math.ceil(c * (e / 0.97) ** 2))
+    st.session_state.ciclos = int(c)
+    _desde_ciclos()
+
+
+def panel_precision(clave):
+    if _cumple_todo:
+        st.success(f"✅ Todos los resultados tienen error ≤ 1 % con confianza del 99 % "
+                   f"(el mayor es {mil(_err_max, 2)} %). No hace falta ajustar nada.")
+        return
+    with st.expander(f"⚠️ Hay resultados con más de 1 % de error (el mayor es {mil(_err_max, 2)} %). "
+                     "Ver cómo ajustarlo", expanded=(clave == "global")):
+        st.markdown(
+            "Con los datos que puso, algunos resultados quedan por encima del **1 % de error** (confianza 99 %). "
+            "Hay dos formas de corregirlo; elija la que prefiera:")
+        c1, c2 = st.columns(2)
+        with c1, st.container(border=True):
+            st.markdown(f"**Opción 1 · Más repeticiones** (mismo periodo)  \n"
+                        f"Repetir la simulación unas **{min(_rep_nec, 200)}** veces o más en lugar de {repeticiones}; "
+                        "el programa simula y comprueba hasta que todo quede ≤ 1 %.  \n"
+                        "`R = (2,576 × s ÷ (0,01 × promedio))²`")
+            st.button("🎯 Ajustar las repeticiones", on_click=_ajustar_repeticiones,
+                      key=f"rep_{clave}", type="primary", use_container_width=True)
+            if _rep_nec > 200:
+                st.caption("Se necesitan más de 200; se ajusta al máximo. Combínelo con la opción 2.")
+        with c2, st.container(border=True):
+            st.markdown(f"**Opción 2 · Más ciclos** (mismas repeticiones)  \n"
+                        f"Alargar el periodo a unos **{mil(_ciclos_nec)} ciclos** o más (hoy {mil(K['Ciclos'])}); el programa "
+                        "simula y comprueba hasta encontrar los necesarios, y la hora final se corre sola.  \n"
+                        "`ciclos = ciclos actuales × (error mayor ÷ 1 %)²`")
+            st.button("🔁 Ajustar los ciclos (y la hora final)", on_click=_ajustar_ciclos,
+                      key=f"cic_{clave}", use_container_width=True)
+        st.caption(f"La semilla actual es {semilla}. Cambiar la semilla mueve un poco los resultados, pero no reduce el "
+                   "error de forma confiable: lo que lo reduce son más repeticiones o más ciclos.")
+
+
+panel_precision("global")
+
 tabs = st.tabs(["📊 Resumen", "📑 Reportes", "🚗 Simulación en vivo", "🚦 Capacidad",
                 "✅ Validación", "📋 Datos de campo", "🎲 Generador", "📘 Cómo funciona"])
 
@@ -330,15 +407,7 @@ with tabs[0]:
          "total, valle, pico y cada semáforo", VERDE if cumple else PICO),
         ("Repeticiones para que todo cumpla", mil(min(rep_necesarias, 200)), f"hoy: {repeticiones}", "#7c3aed"),
     ]), unsafe_allow_html=True)
-    if not cumple:
-        def _ajustar():
-            st.session_state.repeticiones = int(min(max(rep_necesarias, st.session_state.repeticiones), 200))
-            _desde_periodo()
-        st.button(f"🎯 Ajustar a {min(rep_necesarias, 200)} repeticiones para que todo quede con error ≤ 1 %",
-                  on_click=_ajustar, type="primary")
-        if rep_necesarias > 200:
-            st.caption("Se necesitan más de 200 repeticiones; se ajusta al máximo (200). Un periodo más largo también "
-                       "reduce el error relativo.")
+    panel_precision("resumen")
     c1, c2 = st.columns([1.2, 1])
     with c1:
         tabla(prec)
