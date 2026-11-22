@@ -9,6 +9,7 @@ Los semáforos se ponen en verde uno después del otro (S1 → S2 → S3 → S4)
 """
 
 import json
+import math
 
 import pandas as pd
 
@@ -27,6 +28,29 @@ POSICIONES_DEFECTO = {
     "S4": {"lat": 4.3069530, "lon": -74.8033923, "rumbo": 158,
            "via": "Carrera 10, llegando desde el sur (Calle 33)"},
 }
+
+
+def rumbo_hacia(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Dirección (0 = norte, 90 = este) para mirar desde el punto 1 hacia el punto 2."""
+    d_n = (lat2 - lat1) * 111320
+    d_e = (lon2 - lon1) * 111320 * math.cos(math.radians(lat1))
+    return round(math.degrees(math.atan2(d_e, d_n)) % 360)
+
+
+def enlaces_google(pos: dict, centro: tuple[float, float]) -> dict[str, str]:
+    """Enlaces oficiales de Google Maps (no necesitan clave).
+
+    - Street View parado en el semáforo y mirando como el conductor que llega
+      (hacia el cruce, en el sentido contrario a "rumbo").
+    - Mapa centrado en el semáforo.
+    """
+    lat, lon = pos["lat"], pos["lon"]
+    heading = round((pos["rumbo"] + 180) % 360) if "rumbo" in pos else rumbo_hacia(lat, lon, *centro)
+    return {
+        "street_view": ("https://www.google.com/maps/@?api=1&map_action=pano"
+                        f"&viewpoint={lat:.7f},{lon:.7f}&heading={heading}&pitch=5&fov=90"),
+        "mapa": f"https://www.google.com/maps/search/?api=1&query={lat:.7f},{lon:.7f}",
+    }
 
 
 def html_mapa(ciclos: pd.DataFrame, info: pd.DataFrame, centro: tuple[float, float],

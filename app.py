@@ -15,7 +15,7 @@ from simulador.datos import PERIODOS, SEMAFOROS, calcular_llegadas, cargar_semaf
 from simulador.exportar import (NOMBRES, excel_datos_campo, excel_prediccion, pdf_datos_campo,
                                 pdf_prediccion)
 from simulador.generador import GeneradorCongruencial
-from simulador.mapa import CENTRO_DEFECTO, POSICIONES_DEFECTO, html_mapa
+from simulador.mapa import CENTRO_DEFECTO, POSICIONES_DEFECTO, enlaces_google, html_mapa
 from simulador.modelo import Escenario, barrido_demanda, simular, tabla_intervalos
 from simulador.prediccion import (EscenarioPrediccion, MAX_CICLOS_TOTALES, ciclos_estimados,
                                   predecir, texto_horas_pico)
@@ -211,6 +211,18 @@ with tabs[2]:
     anim = res.ciclos.groupby("semaforo").head(ciclos_anim)
     components.html(html_mapa(anim, res.info_semaforos, (lat, lon), posiciones,
                               e.inicio.strftime("%Y-%m-%dT%H:%M:%S")), height=680)
+
+    st.markdown("#### Vista de la calle (Google Maps)")
+    st.caption("Abre en otra pestaña la vista de Google Street View desde cada semáforo, mirando como el conductor que llega al cruce, "
+               "o su ubicación en Google Maps.")
+    cols = st.columns(4)
+    for col, s_m in zip(cols, SEMAFOROS):
+        enl = enlaces_google(posiciones[s_m], (lat, lon))
+        with col:
+            st.markdown(f"**{s_m} · {semaforos[s_m].ubicacion}**")
+            st.caption(POSICIONES_DEFECTO[s_m]["via"])
+            st.link_button("👁 Street View", enl["street_view"], use_container_width=True)
+            st.link_button("📍 Google Maps", enl["mapa"], use_container_width=True)
 
 # ---------------------------------------------------------------------------
 # 4. Capacidad
