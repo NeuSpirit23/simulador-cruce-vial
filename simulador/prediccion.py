@@ -4,8 +4,9 @@ El usuario escoge desde qué día y hora hasta qué día y hora quiere predecir.
 Cada ciclo de cada semáforo se ubica en el reloj: si empieza en una hora pico
 se usan las tablas de frecuencias de hora pico; si no, las de hora valle.
 
-Horas pico fijas (las que se midieron en campo): 12:00–13:00 y 17:00–18:00.
-El resto del día se toma como hora valle.
+Horas pico fijas: las que quedaron marcadas como "Pico" en el Excel de campo
+(12:00–13:00 y 17:00–18:30). El resto del día se toma como hora valle.
+Los resultados se agrupan en franjas de 30 minutos.
 
 La simulación se repite R veces (repeticiones). Cada repetición usa números
 pseudoaleatorios distintos del mismo generador, así que el resultado final es
@@ -18,20 +19,48 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from .datos import DatosSemaforo
+from .datos import DatosSemaforo, ventanas_pico
 from .generador import GeneradorCongruencial
 from .modelo import capacidad_con_verde, tabla_intervalos
 
-HORAS_PICO = (12, 17)          # la hora h cubre de h:00 a h:59
-MAX_CICLOS_TOTALES = 4_000_000  # límite de cálculo (ciclos × repeticiones)
+VENTANAS_PICO = ventanas_pico()   # minutos desde medianoche, sacadas del Excel
+FRANJA_MIN = 30                   # los resultados se agrupan en franjas de 30 min
+MAX_CICLOS_TOTALES = 4_000_000    # límite de cálculo (ciclos × repeticiones)
 
 
-def periodo_de_hora(hora: int) -> str:
-    return "Pico" if hora in HORAS_PICO else "Valle"
+def es_minuto_pico(minuto_dia):
+    """True si ese minuto del día (0–1439) cae en una franja pico. Acepta números o arreglos."""
+    m = np.asarray(minuto_dia)
+    r = np.zeros(m.shape, dtype=bool)
+    for ini, fin in VENTANAS_PICO:
+        r |= (m >= ini) & (m < fin)
+    return r
+
+
+def periodo_de_minuto(minuto_dia: int) -> str:
+    return "Pico" if bool(es_minuto_pico(minuto_dia)) else "Valle"
+
+
+def _hhmm(m: int) -> str:
+    return f"{m // 60:02d}:{m % 60:02d}"
 
 
 def texto_horas_pico() -> str:
-    return " y ".join(f"{h:02d}:00–{h + 1:02d}:00" for h in HORAS_PICO)
+    return " y ".join(f"{_hhmm(a)}–{_hhmm(b)}" for a, b in VENTANAS_PICO)
+
+
+def franjas_pico(inicio: datetime, fin: datetime) -> list[tuple[datetime, datetime]]:
+    """Intervalos de hora pico (fecha y hora) que caen dentro del periodo, para sombrear gráficas."""
+    out = []
+    dia = inicio.replace(hour=0, minute=0, second=0, microsecond=0)
+    while dia < fin:
+        for a, b in VENTANAS_PICO:
+            x0 = max(dia + pd.Timedelta(minutes=a), pd.Timestamp(inicio))
+            x1 = min(dia + pd.Timedelta(minutes=b), pd.Timestamp(fin))
+            if x1 > x0:
+                out.append((x0, x1))
+        dia += pd.Timedelta(days=1)
+    return out
 
 
 @dataclass
@@ -82,15 +111,13 @@ def ciclos_por_numeros(numeros: int, repeticiones: int, n_semaforos: int = 4) ->
 def cubre_valle_y_pico(inicio: datetime, fin: datetime) -> tuple[bool, bool]:
     """¿El rango toca al menos una hora pico y al menos una hora valle?"""
     hay_pico = hay_valle = False
-    t = inicio.replace(minute=0, second=0, microsecond=0)
-    while t < fin and not (hay_pico and hay_valle):
-        tramo_ini, tramo_fin = max(t, inicio), min(t + pd.Timedelta(hours=1), fin)
-        if tramo_fin > tramo_ini:
-            if periodo_de_hora(t.hour) == "Pico":
-                hay_pico = True
-            else:
-                hay_valle = True
-        t += pd.Timedelta(hours=1)
+    t = inicio.replace(second=0, microsecond=0)
+    while t < fin and not (hay_pico and hay_valle):     # se revisa minuto a minuto
+        if periodo_de_minuto(t.hour * 60 + t.minute) == "Pico":
+            hay_pico = True
+        else:
+            hay_valle = True
+        t += pd.Timedelta(minutes=1)
     return hay_valle, hay_pico
 
 
@@ -142,9 +169,9 @@ def predecir(semaforos: dict[str, DatosSemaforo], esc: EscenarioPrediccion) -> R
 
             k = np.arange(n)
             seg_inicio = seg_desde_medianoche + k * ciclo          # desde la medianoche del día inicial
-            hora_abs = (seg_inicio // 3600).astype(np.int64)        # hora absoluta desde ese día
-            hora_dia = hora_abs % 24
-            es_pico = np.isin(hora_dia, HORAS_PICO)
+            franja_abs = (seg_inicio // (FRANJA_MIN * 60)).astype(np.int64)   # franja de 30 min desde ese día
+            minuto_dia = (seg_inicio // 60).astype(np.int64) % 1440
+            es_pico = es_minuto_pico(minuto_dia)
 
             u = np.array(gen.lista(2 * n))
             usados += 2 * n
@@ -167,13 +194,13 @@ def predecir(semaforos: dict[str, DatosSemaforo], esc: EscenarioPrediccion) -> R
                 cola = e - p
                 espera[i], pasan[i], quedan[i] = e, p, cola
 
-            # Totales por hora (todas las repeticiones)
-            horas_unicas, inv = np.unique(hora_abs, return_inverse=True)
+            # Totales por franja de 30 min (todas las repeticiones)
+            horas_unicas, inv = np.unique(franja_abs, return_inverse=True)
             n_ciclos = np.bincount(inv)
             filas_horas.append(pd.DataFrame({
                 "repeticion": rep, "semaforo": s,
-                "hora": [inicio_dia + pd.Timedelta(hours=int(h)) for h in horas_unicas],
-                "periodo": [periodo_de_hora(int(h) % 24) for h in horas_unicas],
+                "hora": [inicio_dia + pd.Timedelta(minutes=int(h) * FRANJA_MIN) for h in horas_unicas],
+                "periodo": [periodo_de_minuto(int(h) * FRANJA_MIN % 1440) for h in horas_unicas],
                 "ciclos": n_ciclos,
                 "llegadas": np.bincount(inv, weights=lleg),
                 "pasan": np.bincount(inv, weights=pasan),

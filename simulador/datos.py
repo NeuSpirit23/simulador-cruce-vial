@@ -33,6 +33,30 @@ class DatosSemaforo:
         return self.verde + self.rojo
 
 
+def _minutos(hhmm: str) -> int:
+    h, m = hhmm.strip().split(":")
+    return int(h) * 60 + int(m)
+
+
+def ventanas_pico(ruta: Path = RUTA_DATOS) -> list[tuple[int, int]]:
+    """Franjas de hora pico tal como quedaron registradas en el Excel de campo.
+
+    Se toman todos los "Bloque horario" marcados como Pico y se unen.
+    Resultado en minutos desde la medianoche, por ejemplo [(720, 780), (1020, 1110)]
+    = 12:00–13:00 y 17:00–18:30.
+    """
+    df = leer_base(ruta)
+    tramos = sorted({tuple(_minutos(x) for x in b.replace("-", "–").split("–"))
+                     for b in df.loc[df["periodo"] == "Pico", "bloque"].unique()})
+    unidas: list[list[int]] = []
+    for ini, fin in tramos:
+        if unidas and ini <= unidas[-1][1]:
+            unidas[-1][1] = max(unidas[-1][1], fin)
+        else:
+            unidas.append([ini, fin])
+    return [tuple(x) for x in unidas]
+
+
 def leer_base(ruta: Path = RUTA_DATOS) -> pd.DataFrame:
     df = pd.read_excel(ruta, sheet_name="Base de datos")
     df = df.rename(columns={

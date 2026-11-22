@@ -25,6 +25,7 @@ from reportlab.platypus import (Image, KeepTogether, PageBreak, Paragraph, Simpl
 
 from .datos import SEMAFOROS
 from .paquete import Paquete
+from .prediccion import franjas_pico
 
 AZUL = "1F4E78"
 AZUL_CLARO = "DDEBF7"
@@ -460,8 +461,8 @@ def pdf_paquete(p: Paquete) -> bytes:
     fig, ax = plt.subplots(figsize=(13, 3.8))
     for s in SEMAFOROS:
         ax.plot(hr["hora"], hr[s], label=s, color=COLORES_SEM[s], lw=1.4)
-    for hp in hr.loc[hr["periodo"] == "Pico", "hora"]:
-        ax.axvspan(hp, hp + pd.Timedelta(hours=1), color=COLOR_PICO, alpha=0.15, lw=0)
+    for x0, x1 in franjas_pico(p.inicio, p.fin):
+        ax.axvspan(x0, x1, color=COLOR_PICO, alpha=0.15, lw=0)
     ax.set_ylabel("Vehículos por hora")
     ax.legend(fontsize=8, ncol=4)
     _estilo_ax(ax)

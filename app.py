@@ -17,7 +17,7 @@ from simulador.generador import GeneradorCongruencial
 from simulador.mapa import CENTRO_DEFECTO, POSICIONES_DEFECTO, enlaces_google, html_mapa
 from simulador.modelo import tabla_intervalos
 from simulador.prediccion import (EscenarioPrediccion, MAX_CICLOS_TOTALES, ciclos_estimados,
-                                  cubre_valle_y_pico, predecir,
+                                  cubre_valle_y_pico, franjas_pico, predecir,
                                   texto_horas_pico)
 from simulador.pruebas import prueba_frecuencias, prueba_ks, prueba_promedios
 from simulador.paquete import construir
@@ -158,7 +158,7 @@ sb.markdown("**Restricciones fijas del cruce**")
 sb.dataframe(pd.DataFrame([{"Semáforo": f"{s} {semaforos[s].ubicacion}", "Verde": f"{semaforos[s].verde} s",
                             "Rojo": f"{semaforos[s].rojo} s"} for s in SEMAFOROS]),
              hide_index=True, use_container_width=True)
-sb.caption(f"Horas pico (fijas): {texto_horas_pico()}. El resto del día es hora valle. "
+sb.caption(f"Horas pico (fijas, tomadas del Excel de campo): {texto_horas_pico()}. El resto del día es hora valle. "
            "Toda simulación debe incluir horas valle y horas pico.")
 
 repeticiones = int(ss.repeticiones)
@@ -246,8 +246,8 @@ def grafico_horas(clave):
     fig = px.line(hr, x="hora", y=SEMAFOROS, markers=len(hr) < 80,
                   labels={"hora": "Hora", "value": "Vehículos por hora", "variable": "Semáforo"},
                   title="Vehículos que pasan por hora")
-    for hp in hr.loc[hr["periodo"] == "Pico", "hora"]:
-        fig.add_vrect(x0=hp, x1=hp + pd.Timedelta(hours=1), fillcolor="orange", opacity=0.15, line_width=0)
+    for x0, x1 in franjas_pico(inicio, fin):
+        fig.add_vrect(x0=x0, x1=x1, fillcolor="orange", opacity=0.15, line_width=0)
     st.plotly_chart(fig, use_container_width=True, key=f"horas_{clave}")
 
 

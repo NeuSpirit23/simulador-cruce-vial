@@ -13,7 +13,7 @@ import pandas as pd
 
 from .datos import PERIODOS, SEMAFOROS, DatosSemaforo
 from .modelo import Escenario, barrido_demanda, simular
-from .prediccion import ResultadoPrediccion, texto_horas_pico
+from .prediccion import FRANJA_MIN, ResultadoPrediccion, texto_horas_pico
 from .reportes import (reporte_bloques, reporte_bloques_ciclos, reporte_horas, reporte_semaforos,
                        reporte_valle_pico)
 
@@ -25,6 +25,8 @@ class Paquete:
     tablas: dict = field(default_factory=dict)      # nombre -> DataFrame con columnas en español
     notas: dict = field(default_factory=dict)       # nombre -> texto explicativo
     graficos: dict = field(default_factory=dict)    # datos para gráficos (DataFrames)
+    inicio: datetime | None = None
+    fin: datetime | None = None
 
 
 def _por_semaforo_y_periodo(res: ResultadoPrediccion) -> pd.DataFrame:
@@ -40,7 +42,7 @@ def _por_semaforo_y_periodo(res: ResultadoPrediccion) -> pd.DataFrame:
             rep = d.groupby("repeticion")[["pasan", "ciclos", "llegadas", "cola_suma"]].sum()
             m = rep.mean()
             ic = 1.96 * rep["pasan"].std(ddof=1) / math.sqrt(r) if r > 1 else 0.0
-            horas = d["hora"].nunique()
+            horas = d["hora"].nunique() * FRANJA_MIN / 60
             filas.append({
                 "Semáforo": s, "Periodo": p, "Horas": horas, "Ciclos": m["ciclos"],
                 "Vehículos que pasan": m["pasan"], "± IC 95 %": ic,
@@ -115,7 +117,7 @@ def construir(res: ResultadoPrediccion, semaforos: dict[str, DatosSemaforo], bas
         ("Semilla del generador", e.semilla),
         ("Generador", "X(n+1) = 16807 · X(n) mod 2147483647"),
         ("Demanda (× la observada)", e.factor_demanda),
-        ("Horas pico (fijas)", texto_horas_pico()),
+        ("Horas pico (fijas, del Excel de campo)", texto_horas_pico()),
         ("Horas valle", "todas las demás"),
         ("Bloques de horas del reporte", f"{horas_bloque} h"),
         ("Bloques de ciclos del reporte", f"{ciclos_bloque} ciclos"),
@@ -179,7 +181,8 @@ def construir(res: ResultadoPrediccion, semaforos: dict[str, DatosSemaforo], bas
         "Valle vs pico": "Todas las horas valle frente a todas las horas pico del periodo simulado.",
         f"Bloques de {horas_bloque} h": "Bloques de horas desde la medianoche. Cuántos vehículos pasan, qué % del "
                                          "total representa y cuánto de eso fue en hora valle y en hora pico.",
-        "Por hora": "Vehículos que pasan en cada hora del periodo, por semáforo.",
+        "Por hora": "Vehículos que pasan en cada hora del periodo, por semáforo. 'Valle y pico' = hora que "
+                    "tiene media hora de cada una (por ejemplo 18:00–19:00).",
         f"Bloques de {ciclos_bloque} ciclos": "Ciclos agrupados de a " + str(ciclos_bloque) + " por semáforo.",
         "Capacidad": "Capacidad (veh/h) = pasan máx. por verde × 3600 ÷ ciclo. Uso = llegadas prom. ÷ capacidad "
                      "por verde. Si el uso llega a 100 %, el semáforo se satura.",
@@ -187,4 +190,4 @@ def construir(res: ResultadoPrediccion, semaforos: dict[str, DatosSemaforo], bas
     }
     graficos = {"bloques": b, "horas": hr, "bloques_ciclos": bc, "barrido": barrido}
     titulo = (f"Predicción del {e.inicio:%d/%m/%Y %H:%M} al {e.fin:%d/%m/%Y %H:%M}")
-    return Paquete(titulo, kpis, t, notas, graficos)
+    return Paquete(titulo, kpis, t, notas, graficos, e.inicio, e.fin)

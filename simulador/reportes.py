@@ -11,7 +11,7 @@ import math
 import pandas as pd
 
 from .datos import SEMAFOROS
-from .prediccion import ResultadoPrediccion
+from .prediccion import FRANJA_MIN, ResultadoPrediccion
 
 
 def _promedio_repeticiones(horas: pd.DataFrame, claves: list[str]) -> pd.DataFrame:
@@ -64,11 +64,22 @@ def reporte_bloques(res: ResultadoPrediccion, horas_bloque: int = 2) -> pd.DataF
                 "en_valle", "pct_valle", "en_pico", "pct_pico"]]
 
 
+def _a_horas(horas: pd.DataFrame) -> pd.DataFrame:
+    """Junta las franjas de 30 min en horas. Si una hora tiene franjas valle y pico, queda 'Valle y pico'."""
+    h = horas.copy()
+    h["hora"] = h["hora"].dt.floor("h")
+    etiqueta = h.groupby("hora")["periodo"].agg(lambda x: x.iloc[0] if x.nunique() == 1 else "Valle y pico")
+    h = h.groupby(["repeticion", "semaforo", "hora"], as_index=False)[["ciclos", "llegadas", "pasan", "cola_suma"]].sum()
+    h["periodo"] = h["hora"].map(etiqueta)
+    return h
+
+
 def reporte_horas(res: ResultadoPrediccion) -> pd.DataFrame:
-    p = _promedio_repeticiones(res.horas, ["hora", "periodo", "semaforo"])
+    hh = _a_horas(res.horas)
+    p = _promedio_repeticiones(hh, ["hora", "periodo", "semaforo"])
     tabla = p.pivot_table(index=["hora", "periodo"], columns="semaforo", values="pasan").reindex(columns=SEMAFOROS).fillna(0)
     tabla["total"] = tabla[SEMAFOROS].sum(axis=1)
-    tot = _promedio_repeticiones(res.horas, ["hora"]).set_index("hora")
+    tot = _promedio_repeticiones(hh, ["hora"]).set_index("hora")
     tabla = tabla.reset_index().set_index("hora")
     tabla["ic95"] = tot["ic95"]
     tabla["ciclos"] = tot["ciclos"]
@@ -87,7 +98,7 @@ def reporte_valle_pico(res: ResultadoPrediccion) -> pd.DataFrame:
         d = h[h["periodo"] == periodo]
         if d.empty:
             continue
-        horas_n = d["hora"].nunique()
+        horas_n = d["hora"].nunique() * FRANJA_MIN / 60
         por_rep = d.groupby("repeticion")["pasan"].sum()
         fila = {"periodo": periodo, "horas": horas_n, "pasan": por_rep.mean(),
                 "pct_del_total": 100 * por_rep.mean() / total if total else 0,

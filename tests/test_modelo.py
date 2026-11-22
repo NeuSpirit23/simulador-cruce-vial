@@ -55,9 +55,9 @@ def test_prediccion_por_fechas_y_reportes():
     bloques = reporte_bloques(res, 2)
     assert len(bloques) == 7
     assert abs(bloques["pct_del_total"].sum() - 100) < 1e-6
-    # los bloques 12–14 y 16–18 incluyen horas pico; los demás no
+    # pico del Excel: 12:00–13:00 y 17:00–18:30 → bloques 12–14, 16–18 y 18–20
     con_pico = bloques[bloques["en_pico"] > 0]["bloque_ini"].dt.hour.tolist()
-    assert con_pico == [12, 16]
+    assert con_pico == [12, 16, 18]
     assert len(reporte_horas(res)) == 14
     vp = reporte_valle_pico(res).set_index("periodo")
     assert vp.loc["Pico", "prom_por_hora"] > vp.loc["Valle", "prom_por_hora"]
@@ -86,3 +86,9 @@ def test_modos_y_restriccion_valle_pico():
     assert (res.info_semaforos["ciclos"] == 60).all()
     bc = reporte_bloques_ciclos(res, 10)
     assert len(bc) == 24 and abs(bc.groupby("semaforo")["pct_del_semaforo"].sum() - 100).max() < 1e-6
+
+
+def test_horas_pico_salen_del_excel():
+    from simulador.prediccion import VENTANAS_PICO, texto_horas_pico
+    assert VENTANAS_PICO == [(12 * 60, 13 * 60), (17 * 60, 18 * 60 + 30)]
+    assert texto_horas_pico() == "12:00–13:00 y 17:00–18:30"

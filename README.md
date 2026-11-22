@@ -48,7 +48,7 @@ Si se cambia cualquiera de los tres, los otros se recalculan solos. Por ejemplo,
 
 Además se escogen las **repeticiones**, la **semilla**, el nivel de demanda y el tamaño de los bloques de los reportes (horas y ciclos). **Todo se recalcula solo** al cambiar cualquier dato: todas las pestañas y los archivos Excel y PDF quedan siempre actualizados.
 
-**Restricciones fijas:** los 4 semáforos con sus tiempos (verde 25/30/25/35 s y rojo 99 s) y las **horas pico** 12:00–13:00 y 17:00–18:00, que son las medidas en campo. El resto del día es hora valle. **Toda simulación debe incluir horas valle y horas pico**; si el periodo no las tiene, el programa avisa y no simula. El límite es de 4 millones de ciclos en total (ciclos × semáforos × repeticiones), por ejemplo un año completo con 3 repeticiones.
+**Restricciones fijas:** los 4 semáforos con sus tiempos (verde 25/30/25/35 s y rojo 99 s) y las **horas pico** 12:00–13:00 y 17:00–18:30, tal como quedaron marcadas en el Excel de campo (el programa las lee de ahí). El resto del día es hora valle. **Toda simulación debe incluir horas valle y horas pico**; si el periodo no las tiene, el programa avisa y no simula. El límite es de 4 millones de ciclos en total (ciclos × semáforos × repeticiones), por ejemplo un año completo con 3 repeticiones.
 
 | Pestaña | Qué muestra |
 |---|---|
