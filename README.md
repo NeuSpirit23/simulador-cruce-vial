@@ -50,15 +50,18 @@ Además se escogen las **repeticiones**, la **semilla**, el nivel de demanda y e
 
 **Restricciones fijas:** los 4 semáforos con sus tiempos (verde 25/30/25/35 s y rojo 99 s) y las **horas pico** 12:00–13:00 y 17:00–18:30, tal como quedaron marcadas en el Excel de campo (el programa las lee de ahí). El resto del día es hora valle. **Toda simulación debe incluir horas valle y horas pico**; si el periodo no las tiene, el programa avisa y no simula. El límite es de 4 millones de ciclos en total (ciclos × semáforos × repeticiones), por ejemplo un año completo con 3 repeticiones.
 
+**Descargas:** arriba, debajo del encabezado, hay solo dos botones: **📗 Descargar Excel** y **📕 Descargar PDF**. Los dos traen el resumen ejecutivo, todos los reportes, los datos de campo y el tramo elegido en el explorador.
+
 | Pestaña | Qué muestra |
 |---|---|
-| **Resumen** | Indicadores (total, margen IC 95 %, valle y pico), resultados por semáforo, cada semáforo en valle y en pico, valle frente a pico y gráficas. Botones para descargar **todo en Excel** y **todo en PDF**. |
-| **Reportes** | Todo junto, siempre con hora valle y hora pico: bloques de horas, por hora, bloques de ciclos, semáforo × periodo, valle frente a pico y el detalle por ciclo de los 4 semáforos. |
-| **Simulación en vivo** | La simulación animada en el **mapa satelital** y en una **maqueta 3D** del cruce, sincronizados. Los carros hacen fila, los semáforos cambian de color y cada carro que pasa gira a la izquierda, sigue derecho o gira a la derecha (al azar, con el generador del curso). En 3D se gira la cámara con el mouse. También hay botones de Street View y Google Maps por semáforo. |
-| **¿Cuánto aguanta el cruce?** | Capacidad en hora valle y en hora pico, y hasta cuánto puede crecer la demanda antes de saturarse. |
-| **Validación** | Compara lo simulado con lo observado (valle y pico) con el error del método de los 11 pasos. |
-| **Datos de campo** | Resumen de los 221 registros, tablas de codificación por intervalos de los 4 semáforos en valle y en pico, y descarga en Excel y PDF. |
-| **Generador y pruebas** | El generador congruencial y las pruebas de promedios, frecuencias y Kolmogorov-Smirnov (Coss Bu, cap. 3). |
+| **Resumen** | Conclusiones automáticas, indicadores (total ± IC 99 %, valle y pico), precisión con panel para llegar a error ≤ 1 %, resultados por semáforo y gráficas. |
+| **Reportes** | **Explorador**: de qué hora a qué hora (o de qué ciclo a qué ciclo) y cada cuánto agrupar (30 min, 1 h, 2 h… o cada N ciclos), con botón para llevar ese tramo al Excel y al PDF. Después: bloques de horas, por hora, bloques de ciclos, mapa de calor, diagramas de caja, colas, semáforo × periodo, valle frente a pico, números pseudoaleatorios y detalle por ciclo. |
+| **Análisis y casos** | Esquema de cómo viaja cada dato por el simulador, qué hace cada campo (con su fórmula) y **casos de prueba** que cambian un solo campo a la vez sobre la simulación actual (semilla, repeticiones, demanda, periodo). |
+| **Simulación en vivo** | La simulación animada en el **mapa** y en una **maqueta 3D** del cruce, sincronizados. Los carros hacen fila, los semáforos cambian de color y cada carro que pasa gira a la izquierda, sigue derecho o gira a la derecha (solo visual). En 3D se gira la cámara con el mouse. También hay botones de Street View y Google Maps por semáforo. |
+| **Capacidad** | Capacidad en hora valle y en hora pico, y hasta cuánto puede crecer la demanda antes de saturarse. |
+| **Validación** | Compara lo simulado con lo observado (valle y pico) y la prueba de ajuste de las llegadas. |
+| **Datos de campo** | Resumen de los 221 registros y tablas de codificación por intervalos de los 4 semáforos en valle y en pico. |
+| **Generador** | El generador congruencial y las pruebas de promedios, frecuencias y Kolmogorov-Smirnov (Coss Bu, cap. 3). |
 | **Cómo funciona** | La explicación del modelo, paso a paso. |
 
 **El Excel** trae una hoja por reporte (Resumen, Semáforo y periodo, Bloques de horas, Por hora, Bloques de ciclos, Capacidad, Validación, Por ciclo y Datos de campo), con encabezados, formatos numéricos, filtros y gráficos. **El PDF** trae indicadores, tablas y gráficas de todos los reportes, con hora valle y hora pico.
@@ -90,7 +93,7 @@ En cada ciclo, para cada semáforo:
 
 ---
 
-> La vista satelital y la 3D cargan sus librerías desde internet (Leaflet, three.js e imágenes de Esri), así que necesitan conexión.
+> **Funciona sin internet.** Leaflet y three.js vienen dentro del repositorio (`simulador/vendor/`). Solo las fotos satelitales de Esri necesitan conexión: si no hay, el mapa muestra un plano dibujado con las vías reales.
 
 ## Estructura
 
@@ -104,7 +107,10 @@ simulador/reportes.py   Reportes por bloques, por hora, valle vs pico
 simulador/paquete.py    Arma todos los reportes (los mismos en app, Excel y PDF)
 simulador/exportar.py   Exportación a Excel y PDF
 simulador/mapa.py       Ubicación del cruce y enlaces de Google Maps / Street View
-simulador/visor.py      Simulación en vivo: mapa satelital + maqueta 3D (Leaflet + three.js)
+simulador/visor.py      Simulación en vivo: mapa + maqueta 3D (Leaflet + three.js, incluidos)
+simulador/vendor/       Leaflet 1.9.4 y three.js 0.160 (para trabajar sin internet)
+simulador/explorador.py Explorador de tramos (de hora a hora / de ciclo a ciclo)
+simulador/casos.py      Casos de prueba y qué hace cada campo
 simulador/geometria.py  Calles reales del cruce (trazadas sobre Google Maps), sentidos y rutas de giro
 simulador/estilo.py     Estilo visual (tema, tarjetas, gráficas)
 simulador/pruebas.py    Pruebas de uniformidad (Coss Bu, cap. 3)

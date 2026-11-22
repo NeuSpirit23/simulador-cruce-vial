@@ -19,10 +19,9 @@ import math
 import pandas as pd
 
 _PLANTILLA = r"""<!DOCTYPE html><html><head><meta charset="utf-8">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js",
-"three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
+<style>__LEAFLET_CSS__</style>
+<script>__LEAFLET_JS__</script>
+<script type="importmap">__IMPORTMAP__</script>
 <style>
  *{box-sizing:border-box}
  body{margin:0;font-family:"Inter",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#1d2433;background:transparent}
@@ -45,6 +44,8 @@ _PLANTILLA = r"""<!DOCTYPE html><html><head><meta charset="utf-8">
  .ley span{display:inline-flex;align-items:center;gap:4px}
  .chip{width:16px;height:8px;border-radius:2px;display:inline-block}
  .carro{width:15px;height:7px;border-radius:2px;border:1px solid rgba(0,0,0,.55);box-shadow:0 0 3px rgba(0,0,0,.5)}
+ .ref{background:rgba(255,255,255,.85);color:#475569;border:0;box-shadow:none;font-size:10px;padding:1px 5px;border-radius:5px}
+ .ref::before{display:none}
  .etq{background:rgba(15,42,68,.88);color:#fff;border:none;border-radius:6px;font-size:11.5px;padding:2px 7px;box-shadow:none;font-weight:600}
  .etq:before{display:none}
  #aviso3d{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#cfd8e3;font-size:13px;text-align:center;padding:20px}
@@ -192,12 +193,38 @@ document.querySelectorAll('#modo button').forEach(b => b.onclick = () => {
 
 // ---------------------------------------------------------------- vista 1: mapa satelital (Leaflet)
 (function(){
-  if (typeof L === 'undefined'){ document.getElementById('mapa').innerHTML = '<div id="aviso3d">No se pudo cargar el mapa (sin internet).</div>'; return; }
+  if (typeof L === 'undefined'){ document.getElementById('mapa').innerHTML = '<div id="aviso3d">No se pudo cargar el mapa.</div>'; return; }
   const c0 = D.centro, kx = 111320*Math.cos(rad(c0[0]));
   const ll = p => [c0[0] + p[1]/111320, c0[1] + p[0]/kx];
   const mapa = L.map('mapa', {zoomControl:true, attributionControl:true}).setView(c0, 19);
-  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     {maxZoom:21, maxNativeZoom:19, attribution:'Imágenes © Esri'}).addTo(mapa);
+  // Sin internet no llegan las fotos satelitales: se dibuja un plano con las vías reales, a escala
+  let fotos = 0, plano = null;
+  sat.on('tileload', () => { fotos++; });
+  function dibujarPlano(){
+    if (plano || fotos > 0) return;
+    mapa.removeLayer(sat);
+    document.getElementById('mapa').style.background = '#dfe8d6';
+    mapa.createPane('plano').style.zIndex = 350;   // debajo de las guías, semáforos y carros
+    mapa.createPane('refs').style.zIndex = 380;    // nombres de negocios, debajo de las etiquetas S1–S4
+    plano = L.layerGroup().addTo(mapa);
+    const mpp = () => 40075016.686 * Math.cos(rad(c0[0])) / Math.pow(2, mapa.getZoom() + 8);  // metros por píxel
+    const capas = [];
+    D.vias.forEach(v => {
+      const a = L.polyline(v.pts.map(ll), {pane:'plano', color:'#cfcac0', weight:1, lineCap:'round', interactive:false}).addTo(plano);
+      const b = L.polyline(v.pts.map(ll), {pane:'plano', color:'#3b3f45', weight:1, lineCap:'round', interactive:false}).addTo(plano);
+      capas.push([a, v.ancho + 4.2], [b, v.ancho]);
+    });
+    const plaza = L.circle(c0, {pane:'plano', radius:11, stroke:false, fillColor:'#3b3f45', fillOpacity:1, interactive:false}).addTo(plano);
+    D.referencias.forEach(r => L.tooltip({pane:'refs', permanent:true, direction:'center', className:'ref'}).setLatLng(ll(r.p))
+      .setContent(r.nombre).addTo(plano));
+    const ajustar = () => capas.forEach(([l, w]) => l.setStyle({weight: Math.max(2, w / mpp())}));
+    mapa.on('zoomend', ajustar); ajustar();
+    mapa.attributionControl.setPrefix('Plano dibujado (sin conexión)');
+  }
+  sat.on('tileerror', () => setTimeout(dibujarPlano, 1500));
+  setTimeout(dibujarPlano, 6000);
   // ejes de las vías y carriles de llegada (guías)
   D.vias.forEach(v => L.polyline(v.pts.map(ll), {color:'#ffffff', weight:1, opacity:.22, dashArray: v.doble ? null : '6 6'}).addTo(mapa));
   S.forEach(s => {
@@ -234,7 +261,7 @@ document.querySelectorAll('#modo button').forEach(b => b.onclick = () => {
 const caja = document.getElementById('tres');
 try {
   const THREE = await import('three');
-  const {OrbitControls} = await import('three/addons/controls/OrbitControls.js');
+  const {OrbitControls} = await import('three/addons/controls/OrbitControls.js');  // incluidas en el HTML
   document.getElementById('aviso3d').remove();
   const escena = new THREE.Scene();
   escena.background = new THREE.Color(0xbcd7ee);
@@ -449,6 +476,28 @@ def _metros(lat0: float, lon0: float, lat: float, lon: float) -> tuple[float, fl
 
 from .geometria import REFERENCIAS, VIAS, construir_rutas
 
+import base64
+from functools import lru_cache
+from pathlib import Path
+
+_VENDOR = Path(__file__).with_name("vendor")
+
+
+@lru_cache(maxsize=1)
+def _librerias() -> dict[str, str]:
+    """Leaflet y three.js van dentro del HTML (carpeta simulador/vendor), así el mapa y la maqueta 3D
+    funcionan sin internet. Solo las fotos satelitales necesitan conexión; si no hay, se dibuja un plano."""
+    def leer(n):
+        return (_VENDOR / n).read_text(encoding="utf-8")
+
+    def data_url(n):
+        return "data:text/javascript;base64," + base64.b64encode(leer(n).encode("utf-8")).decode("ascii")
+
+    mapa = {"imports": {"three": data_url("three.module.min.js"),
+                        "three/addons/controls/OrbitControls.js": data_url("OrbitControls.js")}}
+    return {"__LEAFLET_CSS__": leer("leaflet.css"), "__LEAFLET_JS__": leer("leaflet.js"),
+            "__IMPORTMAP__": json.dumps(mapa)}
+
 
 def html_visor(ciclos: pd.DataFrame, info: pd.DataFrame, centro: tuple[float, float],
                posiciones: dict[str, dict], inicio_texto: str, semilla: int,
@@ -482,5 +531,7 @@ def html_visor(ciclos: pd.DataFrame, info: pd.DataFrame, centro: tuple[float, fl
     datos = {"centro": list(centro), "semaforos": semaforos, "inicio": inicio_texto,
              "vias": VIAS, "referencias": REFERENCIAS,
              "semilla": int(semilla), "prob": prob, "cicloComun": ciclo_comun, "despeje": despeje}
-    return (_PLANTILLA.replace("__DATOS__", json.dumps(datos))
-            .replace("__ALTO_VISTA__", str(alto_vista)))
+    html = _PLANTILLA.replace("__DATOS__", json.dumps(datos)).replace("__ALTO_VISTA__", str(alto_vista))
+    for clave, valor in _librerias().items():
+        html = html.replace(clave, valor, 1)
+    return html

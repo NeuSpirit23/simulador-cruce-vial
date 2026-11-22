@@ -157,7 +157,43 @@ def _grafico_barras(ws, titulo, cats, datos, ancla, apilado=False, eje_y="Vehíc
     ws.add_chart(g, ancla)
 
 
-def excel_paquete(p: Paquete) -> bytes:
+def _hoja_tramo(wb, tramo: dict):
+    """Hoja con el tramo elegido en el explorador (de hora a hora o de ciclo a ciclo)."""
+    ws = wb.create_sheet("Tramo elegido", 1)
+    ws.sheet_view.showGridLines = False
+    ind = tramo["ind"]
+    f = _titulo(ws, "Tramo elegido en el explorador", 1, tramo["descripcion"])
+    filas = [("Vehículos que pasan", ind["pasan"]), ("Pasan en hora valle", ind["valle"]),
+             ("Pasan en hora pico", ind["pico"]), ("Vehículos que llegan", ind["llegan"]),
+             ("Ciclos en el tramo", ind["ciclos"]), ("Quedan en cola (prom. por ciclo)", ind["cola_prom"]),
+             ("Cola máxima (veh)", ind["cola_max"])]
+    if "veh_h" in ind:
+        filas[3:3] = [("Promedio por hora", ind["veh_h"]), ("Intervalo con más vehículos", ind["intervalo_max"]),
+                      ("Intervalo con menos vehículos", ind["intervalo_min"])]
+    for k, v in filas:
+        a = ws.cell(f, 1, k)
+        a.fill = PatternFill("solid", fgColor=AZUL_CLARO)
+        a.font = Font(bold=True)
+        a.border = _borde
+        b = ws.cell(f, 2, v.item() if hasattr(v, "item") else v)
+        b.border = _borde
+        if isinstance(b.value, float):
+            b.number_format = "#,##0.0" if abs(b.value) < 100 else "#,##0"
+        f += 1
+    tab = tramo["tabla"].drop(columns=[c for c in ("Desde",) if c in tramo["tabla"].columns])
+    ini, fin = _tabla_excel(ws, tab, f + 2, titulo="Datos por intervalo", filtro=True)
+    if not tramo["por_semaforo"] and len(tab) <= 400:
+        cats = Reference(ws, min_col=1, min_row=ini + 1, max_row=fin)
+        cols = list(tab.columns)
+        datos = [Reference(ws, min_col=cols.index(c) + 1, min_row=ini, max_row=fin)
+                 for c in ("Pasan en valle", "Pasan en pico")]
+        _grafico_barras(ws, "Vehículos que pasan por intervalo", cats, datos,
+                        f"{get_column_letter(len(cols) + 2)}{ini}", apilado=True)
+    _anchos(ws, maximo=36)
+    ws.column_dimensions["A"].width = 32
+
+
+def excel_paquete(p: Paquete, tramo: dict | None = None) -> bytes:
     wb = Workbook()
     t = p.tablas
 
@@ -325,6 +361,8 @@ def excel_paquete(p: Paquete) -> bytes:
     _tabla_excel(ws, t["Datos de campo"], fin + 3, titulo="Registros", filtro=True)
     _anchos(ws)
 
+    if tramo is not None and not tramo["tabla"].empty:
+        _hoja_tramo(wb, tramo)
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -428,7 +466,123 @@ def _pie(canvas, doc):
     canvas.restoreState()
 
 
-def pdf_paquete(p: Paquete) -> bytes:
+_GRANDE = ParagraphStyle("grande", parent=_est["BodyText"], fontSize=11.5, leading=15,
+                         textColor=colors.HexColor("#1d3b5a"))
+
+
+def _tarjetas_pdf(items, ancho, alto=2.4):
+    """Fila de tarjetas grandes: [(título, valor, detalle, color hex)]."""
+    celdas = [Paragraph(f"<font size=8 color='#595959'>{t}</font><br/>"
+                        f"<font size=19 color='{c}'><b>{v}</b></font><br/>"
+                        f"<font size=7.5 color='#595959'>{d}</font>", ParagraphStyle("tj", parent=_KPI, leading=21))
+              for t, v, d, c in items]
+    tb = Table([celdas], colWidths=[ancho / len(items)] * len(items), rowHeights=[alto * cm])
+    tb.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#BFBFBF")),
+                            ("INNERGRID", (0, 0), (-1, -1), 2, colors.white),
+                            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F4F8FC")),
+                            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                            ("TOPPADDING", (0, 0), (-1, -1), 7), ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]))
+    return tb
+
+
+def _resumen_ejecutivo(p: Paquete, W) -> list:
+    """Primera página del PDF: lo esencial en una hoja."""
+    k, t = p.kpis, p.tablas
+    sem = t["Semáforos"].sort_values("Vehículos que pasan")
+    mayor = sem.iloc[-1]
+    v, pi = k.get("Promedio por hora valle", 0), k.get("Promedio por hora pico", 0)
+    err = k.get("Error relativo IC 99 % (%)", float("nan"))
+    prec = t["Precisión"]
+    cumple = int((prec["¿Cumple ≤ 1 %?"] == "Sí").sum())
+    h = [Paragraph("Resumen ejecutivo · Cruce vial vía Mesa–Girardot", _est["Title"]),
+         Paragraph(p.titulo + " · Carrera 10 con Av. Ciudad de las Acacias, Girardot", _NOTA)]
+    frase = (f"En el periodo simulado pasan <b>{_mil(k['Vehículos que pasan'])} vehículos</b> "
+             f"(± {_mil(k['Margen ± IC 99 %'])} con 99 % de confianza), unos <b>{_mil(k['Promedio por hora'])} por hora</b>. ")
+    if v and pi:
+        frase += (f"En hora pico pasan <b>{_mil(pi)} veh/h</b>, un <b>{_mil(100 * (pi / v - 1), 1)} % más</b> "
+                  f"que en hora valle ({_mil(v)} veh/h). ")
+    frase += f"La entrada con más tráfico es <b>{mayor['Semáforo']} · {mayor['Ubicación']}</b> ({_mil(mayor['% del total'], 1)} % del total)."
+    h += [Paragraph(frase, _GRANDE), Spacer(1, 0.3 * cm)]
+    h.append(_tarjetas_pdf([
+        ("Vehículos que pasan", _mil(k["Vehículos que pasan"]), f"± {_mil(k['Margen ± IC 99 %'])} (IC 99 %)", "#0f2a44"),
+        ("Promedio por hora", _mil(k["Promedio por hora"]), f"en {_mil(k['Horas simuladas'], 1)} h simuladas", "#1f6f8b"),
+        ("Hora valle", _mil(k.get("Pasan en hora valle", 0)), f"{_mil(v)} veh/h", COLOR_VALLE),
+        ("Hora pico", _mil(k.get("Pasan en hora pico", 0)), f"{_mil(pi)} veh/h", COLOR_PICO),
+        ("Error relativo (IC 99 %)", (_mil(err, 2) + " %") if err == err else "—",
+         f"{cumple} de {len(prec)} resultados ≤ 1 %", "#1f9d74" if cumple == len(prec) else COLOR_PICO),
+    ], W))
+    h.append(Spacer(1, 0.35 * cm))
+    # gráfico valle vs pico por semáforo + conclusiones
+    vp = t["Semáforo y periodo"]
+    fig, ax = plt.subplots(figsize=(6.4, 3.7))
+    piv = vp.pivot(index="Semáforo", columns="Periodo", values="Prom. por hora").reindex(SEMAFOROS)
+    x = list(range(len(piv)))
+    for col, dx, color, nom in (("Valle", -0.2, COLOR_VALLE, "Hora valle"), ("Pico", 0.2, COLOR_PICO, "Hora pico")):
+        if col in piv:
+            barras = ax.bar([i + dx for i in x], piv[col], 0.4, label=nom, color=color)
+            ax.bar_label(barras, fmt="%.0f", fontsize=7, padding=2)
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"{s_}\n{u}" for s_, u in zip(piv.index, t["Semáforos"].set_index("Semáforo").reindex(SEMAFOROS)["Ubicación"])],
+                       fontsize=8)
+    ax.set_ylabel("Vehículos por hora")
+    ax.set_title("Vehículos por hora en cada entrada", fontsize=10)
+    ax.legend(fontsize=8)
+    _estilo_ax(ax)
+    puntos = "".join(f"<b>{r['Indicador']}:</b> {r['Resultado']}<br/><font size=7.5 color='#595959'>{r['Detalle']}</font><br/><br/>"
+                     for _, r in t["Conclusiones"].iterrows())
+    der = [Paragraph("Conclusiones", _H1), Paragraph(puntos, ParagraphStyle("pt", parent=_est["BodyText"], fontSize=8.5, leading=10.5))]
+    tb = Table([[[_img(fig, 13.5, 7.8)], der]], colWidths=[W * 0.52, W * 0.48])
+    tb.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
+    h.append(tb)
+    h.append(Paragraph("Valores promedio de todas las repeticiones. Horas pico según los datos de campo; el resto del día "
+                       "se toma como hora valle. El detalle completo está en las páginas siguientes y en el Excel.", _NOTA))
+    return h
+
+
+def _seccion_tramo(tramo: dict, W) -> list:
+    ind, tab = tramo["ind"], tramo["tabla"]
+    h = [Paragraph("Tramo elegido en el explorador", _H1), Paragraph(tramo["descripcion"], _NOTA)]
+    items = [("Vehículos que pasan", _mil(ind["pasan"]), f"{ind['ciclos']} ciclos", "#0f2a44"),
+             ("Hora valle", _mil(ind["valle"]), f"{_mil(100 * ind['valle'] / ind['pasan'], 1)} %" if ind["pasan"] else "", COLOR_VALLE),
+             ("Hora pico", _mil(ind["pico"]), f"{_mil(100 * ind['pico'] / ind['pasan'], 1)} %" if ind["pasan"] else "", COLOR_PICO),
+             ("Quedan en cola", _mil(ind["cola_prom"], 1), f"prom. por ciclo · máx. {ind['cola_max']}", "#64748b")]
+    if "veh_h" in ind:
+        items.insert(3, ("Promedio por hora", _mil(ind["veh_h"]), f"más alto: {ind['intervalo_max']}", "#1f6f8b"))
+    h += [_tarjetas_pdf(items, W, 2.3), Spacer(1, 0.3 * cm)]
+    tab = tab.drop(columns=[c for c in ("Desde",) if c in tab.columns])
+    if not tramo["por_semaforo"]:
+        fig, ax = plt.subplots(figsize=(13, 3.4))
+        xs = list(range(len(tab)))
+        ax.bar(xs, tab["Pasan en valle"], label="En hora valle", color=COLOR_VALLE)
+        ax.bar(xs, tab["Pasan en pico"], bottom=tab["Pasan en valle"], label="En hora pico", color=COLOR_PICO)
+        paso = max(1, len(tab) // 30)
+        ax.set_xticks(xs[::paso])
+        ax.set_xticklabels(tab["Intervalo"].tolist()[::paso], rotation=45, fontsize=7, ha="right")
+        ax.set_ylabel("Vehículos")
+        ax.legend(fontsize=8)
+        _estilo_ax(ax)
+        h.append(_img(fig, 26, 6.8))
+    else:
+        piv = tab.pivot_table(index="Intervalo", columns="Semáforo", values="Pasan (veh)", sort=False)
+        fig, ax = plt.subplots(figsize=(13, 3.4))
+        n = len(piv.columns)
+        for j, s_ in enumerate(piv.columns):
+            ax.bar([i + (j - (n - 1) / 2) * 0.8 / n for i in range(len(piv))], piv[s_], 0.8 / n, label=s_,
+                   color=COLORES_SEM.get(s_))
+        paso = max(1, len(piv) // 30)
+        ax.set_xticks(list(range(len(piv)))[::paso])
+        ax.set_xticklabels(piv.index.tolist()[::paso], rotation=45, fontsize=7, ha="right")
+        ax.set_ylabel("Vehículos")
+        ax.legend(fontsize=8, ncol=4)
+        _estilo_ax(ax)
+        h.append(_img(fig, 26, 6.8))
+    h.append(_tabla_pdf(tab, W, max_filas=300))
+    if len(tab) > 300:
+        h.append(Paragraph("Se muestran los primeros 300 intervalos; el Excel tiene todos.", _NOTA))
+    return h
+
+
+def pdf_paquete(p: Paquete, tramo: dict | None = None) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=1.2 * cm, rightMargin=1.2 * cm,
                             topMargin=1.2 * cm, bottomMargin=1.3 * cm,
@@ -438,6 +592,9 @@ def pdf_paquete(p: Paquete) -> bytes:
     g = p.graficos
     h = []
 
+    # 0. Resumen ejecutivo (una página)
+    h += _resumen_ejecutivo(p, W)
+    h.append(PageBreak())
     # 1. Resumen
     h.append(Paragraph("Reporte de simulación · Cruce vial vía Mesa–Girardot", _est["Title"]))
     h.append(Paragraph(p.titulo + " · Carrera 10 con Av. Ciudad de las Acacias, Girardot", _NOTA))
@@ -479,6 +636,11 @@ def pdf_paquete(p: Paquete) -> bytes:
     h.append(Spacer(1, 0.3 * cm))
     h.append(KeepTogether([Paragraph("Cada semáforo en hora valle y en hora pico", _H1),
                            Paragraph(p.notas["Semáforo y periodo"], _NOTA), _tabla_pdf(vp, W)]))
+
+    # 1b. Tramo elegido en el explorador
+    if tramo is not None and not tramo["tabla"].empty:
+        h.append(PageBreak())
+        h += _seccion_tramo(tramo, W)
 
     # 2. Bloques de horas
     nombre_b = next(k for k in t if k.startswith("Bloques de") and k.endswith(" h"))

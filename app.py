@@ -16,6 +16,7 @@ import streamlit.components.v1 as components
 from simulador.datos import PERIODOS, SEMAFOROS, calcular_llegadas, cargar_semaforos, leer_base
 from simulador.exportar import _decimales, excel_paquete, pdf_paquete
 from simulador.explorador import FRECUENCIAS_HORA, explorar
+from simulador.casos import CAMPOS, correr_casos
 from simulador.generador import GeneradorCongruencial
 from simulador.mapa import CENTRO_DEFECTO, POSICIONES_DEFECTO, enlaces_google
 from simulador.modelo import tabla_intervalos
@@ -206,16 +207,39 @@ def armar(inicio, fin, repeticiones, semilla, factor, horas_bloque, ciclos_bloqu
     return construir(correr(inicio, fin, repeticiones, semilla, factor), semaforos, base, horas_bloque, ciclos_bloque)
 
 
+def describir_tramo(cfg) -> str:
+    modo, sems, por_sem, desde, hasta, frec, cd, ch, cada = cfg
+    quienes = "los 4 semáforos" if len(sems) == len(SEMAFOROS) else ", ".join(sems)
+    vista = "cada semáforo por separado" if por_sem else "juntos"
+    if modo == "horas":
+        nombre_f = next(k for k, v in FRECUENCIAS_HORA.items() if v == frec)
+        return f"De {desde:%d/%m/%Y %H:%M} a {hasta:%d/%m/%Y %H:%M}, agrupado cada {nombre_f} · {quienes} ({vista})"
+    return f"Del ciclo {cd} al {ch}, agrupado cada {cada} ciclos · {quienes} ({vista})"
+
+
+def calcular_tramo(res_, cfg) -> dict:
+    modo, sems, por_sem, desde, hasta, frec, cd, ch, cada = cfg
+    kw = (dict(desde=desde, hasta=hasta, frecuencia_min=frec) if modo == "horas"
+          else dict(ciclo_desde=cd, ciclo_hasta=ch, cada_ciclos=cada))
+    t, ind = explorar(res_.ciclos, modo, list(sems), por_semaforo=por_sem, **kw)
+    return {"descripcion": describir_tramo(cfg), "tabla": t, "ind": ind, "por_semaforo": por_sem}
+
+
 @st.cache_data(show_spinner="Preparando Excel y PDF…", max_entries=6)
-def archivos(inicio, fin, repeticiones, semilla, factor, horas_bloque, ciclos_bloque):
+def archivos(inicio, fin, repeticiones, semilla, factor, horas_bloque, ciclos_bloque, tramo_cfg):
     p = armar(inicio, fin, repeticiones, semilla, factor, horas_bloque, ciclos_bloque)
-    return excel_paquete(p), pdf_paquete(p)
+    tramo = calcular_tramo(correr(inicio, fin, repeticiones, semilla, factor), tramo_cfg)
+    return excel_paquete(p, tramo), pdf_paquete(p, tramo)
 
 
 args = (inicio, fin, repeticiones, semilla, factor)
 res = correr(*args)
 pq = armar(*args, horas_bloque, ciclos_bloque)
-xlsx, pdf = archivos(*args, horas_bloque, ciclos_bloque)
+# Tramo del explorador que va en el Excel y el PDF (por defecto: todo el periodo, cada 2 h, los 4 juntos)
+tramo_defecto = ("horas", tuple(SEMAFOROS), False, inicio, fin, 120, 1, 10, 10)
+_guardado = ss.get("tramo_export")
+tramo_cfg = _guardado[1] if _guardado and _guardado[0] == args else tramo_defecto
+xlsx, pdf = archivos(*args, horas_bloque, ciclos_bloque, tramo_cfg)
 T, K, G = pq.tablas, pq.kpis, pq.graficos
 nombre_bh = f"Bloques de {horas_bloque} h"
 nombre_bc = f"Bloques de {ciclos_bloque} ciclos"
@@ -240,6 +264,8 @@ def descargas():
     c2.download_button("📕 Descargar PDF", pdf, f"{archivo}.pdf", key="desc_pdf", type="primary",
                        mime="application/pdf", use_container_width=True,
                        help="El mismo reporte en PDF, con gráficos y tablas, listo para imprimir o entregar.")
+    st.caption(f"📎 Los dos archivos traen el resumen ejecutivo, todos los reportes y el tramo del explorador: "
+               f"{describir_tramo(tramo_cfg)}. Puede cambiarlo en 📑 Reportes → Explorador.")
 
 
 def grafico_valle_pico():
@@ -294,6 +320,7 @@ def explorador():
                 st.warning("La hora final debe ser posterior a la inicial (y dentro del periodo simulado).")
                 return
             kw = dict(desde=desde, hasta=hasta, frecuencia_min=FRECUENCIAS_HORA[frec])
+            cfg = ("horas", tuple(sems), vista == "Cada semáforo", desde, hasta, FRECUENCIAS_HORA[frec], 1, 10, 10)
         else:
             max_c = int(cic["ciclo"].max())
             c1, c2, c3 = st.columns(3)
@@ -304,10 +331,19 @@ def explorador():
                 st.warning("El ciclo final debe ser mayor o igual al inicial.")
                 return
             kw = dict(ciclo_desde=int(cd), ciclo_hasta=int(ch), cada_ciclos=int(cada))
+            cfg = ("ciclos", tuple(sems), vista == "Cada semáforo", inicio, fin, 120, int(cd), int(ch), int(cada))
     if not sems:
         st.info("Escoja al menos un semáforo.")
         return
     por_sem = vista == "Cada semáforo"
+    c1, c2 = st.columns([1, 2.2], vertical_alignment="center")
+    if cfg == tramo_cfg:
+        c1.button("✅ Este tramo ya va en el Excel y el PDF", disabled=True, use_container_width=True, key="exp_ya")
+    elif c1.button("📎 Usar este tramo en el Excel y el PDF", type="primary", use_container_width=True, key="exp_usar"):
+        ss["tramo_export"] = (args, cfg)
+        st.rerun(scope="app")
+    c2.caption("Al pulsarlo, los botones de descarga de arriba preparan el Excel y el PDF con una hoja y una página "
+               "de este tramo, además de todo lo demás.")
     t, ind = explorar(cic, "horas" if modo == "Horas" else "ciclos", sems, por_semaforo=por_sem, **kw)
     if t.empty:
         st.info("No hay ciclos en ese tramo.")
@@ -421,7 +457,7 @@ def panel_precision(clave):
 
 panel_precision("global")
 
-tabs = st.tabs(["📊 Resumen", "📑 Reportes", "🚗 Simulación en vivo", "🚦 Capacidad",
+tabs = st.tabs(["📊 Resumen", "📑 Reportes", "🧪 Análisis y casos", "🚗 Simulación en vivo", "🚦 Capacidad",
                 "✅ Validación", "📋 Datos de campo", "🎲 Generador", "📘 Cómo funciona"])
 
 # ---------------------------------------------------------------------------
@@ -575,9 +611,106 @@ with tabs[1]:
         st.caption(f"Se muestran 20.000 de {mil(len(pc))} ciclos. El Excel tiene todos.")
 
 # ---------------------------------------------------------------------------
+# 2b. Análisis: esquema y casos de prueba
+# ---------------------------------------------------------------------------
+@st.cache_data(show_spinner="Corriendo los casos de prueba…", max_entries=4)
+def casos_prueba(inicio, fin, repeticiones, semilla, factor):
+    return correr_casos(semaforos, EscenarioPrediccion(inicio, fin, repeticiones, semilla, factor),
+                        correr(inicio, fin, repeticiones, semilla, factor))
+
+
+with tabs[2]:
+    st.markdown(seccion("🗺️", "Esquema: cómo viaja cada dato por el simulador",
+                        "De arriba abajo: lo que usted escribe en la barra lateral, cómo se convierte en números "
+                        "pseudoaleatorios, cómo el modelo los usa ciclo a ciclo y en qué reportes termina."), unsafe_allow_html=True)
+    st.graphviz_chart("""
+digraph G {
+  rankdir=TB; bgcolor="transparent"; nodesep=0.3; ranksep=0.35; newrank=true;
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10, color="#cbd5e1", fillcolor="#ffffff"];
+  edge [color="#64748b", fontname="Helvetica", fontsize=8.5];
+  subgraph cluster_e { label="1 · Lo que usted define"; fontname="Helvetica-Bold"; fontsize=10; color="#1f9d74"; style="rounded";
+    per [label="Periodo\\n(inicio y fin)"]; cic [label="Ciclos"]; num [label="Números\\npseudoaleatorios"];
+    rep [label="Repeticiones (R)"]; sem [label="Semilla"]; dem [label="Demanda (×)"]; }
+  subgraph cluster_g { label="2 · Generador congruencial"; fontname="Helvetica-Bold"; fontsize=10; color="#7c3aed"; style="rounded";
+    lcg [label="Xₙ₊₁ = 16.807·Xₙ mod (2³¹−1)\\nU = X ÷ (2³¹−1)", fillcolor="#f5f3ff"]; }
+  subgraph cluster_d { label="Datos de campo (Excel)"; fontname="Helvetica-Bold"; fontsize=10; color="#5B8DB8"; style="rounded";
+    tab [label="Tablas de intervalos\\nllegadas y quedan\\nvalle / pico por semáforo", fillcolor="#eef4fb"];
+    hor [label="Horas pico\\n12:00–13:00 y 17:00–18:30", fillcolor="#fdf0e7"]; }
+  subgraph cluster_m { label="3 · Modelo, cada ciclo y semáforo"; fontname="Helvetica-Bold"; fontsize=10; color="#0f2a44"; style="rounded";
+    lle [label="U1 → llegadas (× demanda)"]; esp [label="en espera = cola anterior + llegadas"];
+    rez [label="U2 → rezagados"]; pas [label="pasan = mín(en espera − rezagados, capacidad)"];
+    que [label="quedan = en espera − pasan\\n(→ cola del siguiente ciclo)"]; }
+  subgraph cluster_s { label="4 · Resultados"; fontname="Helvetica-Bold"; fontsize=10; color="#E07B39"; style="rounded";
+    prom [label="Promedio de R repeticiones\\n± IC 99 % y error relativo", fillcolor="#fff7ed"];
+    rpt [label="Reportes: bloques de horas y ciclos,\\npor hora, mapa de calor, explorador"];
+    arc [label="Excel y PDF"]; viv [label="Simulación en vivo\\n(mapa y 3D, % de giros)"]; }
+  per -> cic [label="÷ duración del ciclo", dir=both]; cic -> num [label="× 2 × R", dir=both]; rep -> num;
+  sem -> lcg; num -> lcg [label="cuántos U"]; lcg -> lle [label="U1"]; lcg -> rez [label="U2"];
+  tab -> lle; tab -> rez; hor -> lle [label="valle o pico\\nsegún la hora"]; dem -> lle;
+  lle -> esp -> pas; rez -> pas; pas -> que; que -> esp [style=dashed, label="siguiente ciclo"];
+  pas -> prom; que -> prom; rep -> prom; prom -> rpt -> arc; pas -> viv [label="repetición 1"];
+}
+""", use_container_width=True)
+
+    st.markdown(seccion("🧩", "Qué hace cada campo", "Qué es, qué parte de la simulación toca y cómo cambia el resultado."),
+                unsafe_allow_html=True)
+    cols_f = st.columns(3)
+    for i, (_, f) in enumerate(CAMPOS.iterrows()):
+        with cols_f[i % 3], st.container(border=True):
+            st.markdown(f"**{f['Campo']}**  \n{f['Qué es']}")
+            st.markdown(f"<span style='color:#64748b;font-size:.86rem'><b>Afecta:</b> {f['Qué afecta']}<br/>"
+                        f"<b>Cómo cambia:</b> {f['Cómo cambia la simulación']}</span>", unsafe_allow_html=True)
+            st.code(f["Fórmula"], language=None, wrap_lines=True)
+
+    st.markdown(seccion("🧪", "Casos de prueba sobre su simulación actual",
+                        "Cada caso cambia un solo campo y deja todo lo demás igual que su simulación. Así se ve qué "
+                        "efecto tiene cada uno. Si cambia la barra lateral, los casos se vuelven a calcular con los nuevos "
+                        "datos."), unsafe_allow_html=True)
+    total_ciclos_rep = K["Ciclos"] * repeticiones
+    if total_ciclos_rep > 600_000 and not ss.get("casos_ok"):
+        st.info(f"Su simulación es grande ({mil(total_ciclos_rep)} ciclos con repeticiones): los 5 casos pueden tardar "
+                "un poco. Pulse el botón para correrlos.")
+        if st.button("▶ Correr los casos de prueba", type="primary", key="casos_btn"):
+            ss["casos_ok"] = True
+            st.rerun()
+    else:
+        cp = casos_prueba(*args)
+        base_v = cp.iloc[0]
+        cols = st.columns(3)
+        for i, (_, f) in enumerate(cp.iloc[1:].iterrows()):
+            delta = f["Δ vehículos vs base (%)"]
+            color = "#1f9d74" if abs(delta) < 1 else (PICO if delta > 0 else VALLE)
+            with cols[i % 3]:
+                st.markdown(
+                    f'<div class="kpi" style="--c:{color};margin-bottom:12px"><div class="et">{f["Caso"]} · '
+                    f'{f["Campo que cambia"]}</div><div class="va" style="font-size:1.05rem">{f["Cambio"]}</div>'
+                    f'<div class="su"><b>{mil(f["Vehículos que pasan"])}</b> vehículos ({"+" if delta >= 0 else ""}'
+                    f'{mil(delta, 1)} %) · error {mil(f["Error relativo (%)"], 2)} % (base {mil(base_v["Error relativo (%)"], 2)} %)'
+                    f' · cola máx. {f["Cola máx. (veh)"]}<br/>{f["Qué pasó"]}</div></div>', unsafe_allow_html=True)
+        c1, c2 = st.columns(2)
+        with c1, st.container(border=True):
+            fig = go.Figure()
+            fig.add_bar(name="En hora valle", x=cp["Caso"], y=cp["En hora valle"], marker_color=VALLE)
+            fig.add_bar(name="En hora pico", x=cp["Caso"], y=cp["En hora pico"], marker_color=PICO)
+            fig.update_layout(barmode="stack", title="Vehículos que pasan en cada caso", height=360,
+                              yaxis_title="Vehículos", legend_title_text="")
+            st.plotly_chart(fig, use_container_width=True, key="casos_veh")
+        with c2, st.container(border=True):
+            fig = go.Figure()
+            fig.add_bar(x=cp["Caso"], y=cp["Error relativo (%)"],
+                        marker_color=[VERDE if e <= 1 else PICO for e in cp["Error relativo (%)"]],
+                        text=[mil(e, 2) + " %" for e in cp["Error relativo (%)"]], textposition="outside")
+            fig.add_hline(y=1, line_dash="dash", line_color="#C73E1D", annotation_text="objetivo 1 %")
+            fig.update_layout(title="Error relativo del total (IC 99 %)", height=360, yaxis_title="%", showlegend=False)
+            st.plotly_chart(fig, use_container_width=True, key="casos_err")
+        tabla(cp)
+        st.caption("Bloques de horas, bloques de ciclos, explorador y % de giros no aparecen como casos porque no "
+                   "cambian la simulación: solo cambian cómo se muestra (ver la tabla de campos).")
+
+# ---------------------------------------------------------------------------
 # 3. Mapa en vivo
 # ---------------------------------------------------------------------------
-with tabs[2]:
+with tabs[3]:
     st.markdown(nota("🚗 Reproducción de la simulación (repetición 1) desde el inicio del periodo, en el <b>mapa "
                      "satelital</b> y en una <b>maqueta 3D</b> sincronizados. Los semáforos se ponen en verde uno tras "
                      "otro (S1 → S2 → S3 → S4). Cada carro que pasa escoge al azar si gira a la <b>izquierda</b> "
@@ -630,7 +763,7 @@ with tabs[2]:
 # ---------------------------------------------------------------------------
 # 4. Capacidad (valle y pico)
 # ---------------------------------------------------------------------------
-with tabs[3]:
+with tabs[4]:
     st.markdown("**¿Cuántos vehículos puede atender el cruce sin problema?** Se repite la simulación aumentando "
                 "la demanda poco a poco, en hora valle y en hora pico, y se mira en qué punto la cola deja de "
                 "despejarse.")
@@ -657,7 +790,7 @@ with tabs[3]:
 # ---------------------------------------------------------------------------
 # 5. Validación
 # ---------------------------------------------------------------------------
-with tabs[4]:
+with tabs[5]:
     st.markdown("Con la demanda observada, el simulador debe dar resultados parecidos a la toma de datos. "
                 "Se usa el error del método de los 11 pasos: **error = |simulado − observado| ÷ observado × 100**.")
     val = T["Validación"]
@@ -675,7 +808,7 @@ with tabs[4]:
 # ---------------------------------------------------------------------------
 # 6. Datos de campo
 # ---------------------------------------------------------------------------
-with tabs[5]:
+with tabs[6]:
     st.markdown(f"Registro manual por ciclo (verde → rojo): **{len(campo)} ciclos** en los cuatro semáforos.")
     tabla(T["Datos de campo (resumen)"])
     st.markdown(seccion("📈", "¿En qué franjas hay más flujo? (datos de campo)"), unsafe_allow_html=True)
@@ -700,7 +833,7 @@ with tabs[5]:
 # ---------------------------------------------------------------------------
 # 7. Generador y pruebas
 # ---------------------------------------------------------------------------
-with tabs[6]:
+with tabs[7]:
     st.markdown("Generador congruencial: **Xₙ₊₁ = 16807·Xₙ mod 2147483647** y **U = X ÷ 2147483647**.  \n"
                 "Antes de confiar en la simulación se comprueba que los U sean uniformes con las pruebas del "
                 "capítulo 3 de Coss Bu.  \nH₀: los números provienen de una distribución uniforme.")
@@ -724,7 +857,7 @@ with tabs[6]:
 # ---------------------------------------------------------------------------
 # 8. Cómo funciona
 # ---------------------------------------------------------------------------
-with tabs[7]:
+with tabs[8]:
     st.markdown(f"""
 **Los 3 parámetros van enlazados en toda simulación.**
 - Periodo → ciclos: cada semáforo cumple `ciclos = segundos del periodo ÷ duración de su ciclo` (124, 129, 124 y 134 s).

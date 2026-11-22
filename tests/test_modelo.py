@@ -125,3 +125,25 @@ def test_explorador_suma_igual_que_la_simulacion():
     assert t.loc[t["Intervalo"] == "12:00–14:00", "Pasan en pico"].iloc[0] > 0
     tc, _ = explorar(r.ciclos, "ciclos", ["S1"], ciclo_desde=1, ciclo_hasta=25, cada_ciclos=10)
     assert list(tc["Ciclos"]) == [10, 10, 5]
+
+
+def test_casos_de_prueba_cambian_lo_esperado():
+    from datetime import datetime
+    from simulador.casos import correr_casos
+    from simulador.datos import cargar_semaforos
+    from simulador.prediccion import EscenarioPrediccion, predecir
+    sem = cargar_semaforos()
+    esc = EscenarioPrediccion(datetime(2026, 11, 22, 6), datetime(2026, 11, 22, 20), 6, 99)
+    t = correr_casos(sem, esc, predecir(sem, esc)).set_index("Caso")
+    base = t.loc["Caso base"]
+    assert t.loc["Más repeticiones", "Números pseudoaleatorios"] == 2 * base["Números pseudoaleatorios"]
+    assert t.loc["Más repeticiones", "Ciclos"] == base["Ciclos"]
+    assert t.loc["Más tráfico", "Vehículos que pasan"] > base["Vehículos que pasan"] > t.loc["Menos tráfico", "Vehículos que pasan"]
+    assert t.loc["Periodo más largo", "Ciclos"] > base["Ciclos"]
+    assert abs(t.loc["Otra semilla", "Δ vehículos vs base (%)"]) < 3
+
+
+def test_visor_funciona_sin_internet():
+    from simulador.visor import _librerias
+    lib = _librerias()
+    assert "Leaflet" in lib["__LEAFLET_JS__"] and "data:text/javascript;base64," in lib["__IMPORTMAP__"]
