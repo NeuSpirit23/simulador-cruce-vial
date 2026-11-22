@@ -38,13 +38,15 @@ streamlit run app.py
 
 ## Qué tiene la aplicación
 
-En la barra lateral se define la simulación de una de tres formas:
+En la barra lateral, **toda simulación usa siempre estos 3 parámetros, enlazados entre sí**:
 
-- **Fechas y horas:** desde qué día y hora hasta qué día y hora.
-- **Cantidad de ciclos:** desde qué día y hora, y cuántos ciclos (verde → rojo) por semáforo.
-- **Cantidad de números pseudoaleatorios:** desde qué día y hora, y cuántos números generar. Cada ciclo usa 2 (U1 y U2), así que `ciclos por semáforo = números ÷ (2 × 4 semáforos × repeticiones)`.
+1. **Periodo:** desde qué día y hora hasta qué día y hora.
+2. **Ciclos:** cuántos ciclos (verde → rojo) caben en el periodo, sumando los 4 semáforos. En cada semáforo, `ciclos = segundos del periodo ÷ duración de su ciclo` (124, 129, 124 y 134 s).
+3. **Números pseudoaleatorios:** cada ciclo usa 2 (U1 y U2) en cada repetición, así que `números = 2 × ciclos × repeticiones`.
 
-También se escogen las **repeticiones**, la **semilla** y el nivel de demanda, y luego se da clic en **Simular**.
+Si se cambia cualquiera de los tres, los otros se recalculan solos. Por ejemplo, si se escriben más ciclos o más números, la hora final se corre para que todo cuadre.
+
+Además se escogen las **repeticiones**, la **semilla** y el nivel de demanda, y luego se da clic en **Simular**.
 
 **Restricciones fijas:** los 4 semáforos con sus tiempos (verde 25/30/25/35 s y rojo 99 s) y las **horas pico** 12:00–13:00 y 17:00–18:00, que son las medidas en campo. El resto del día es hora valle. **Toda simulación debe incluir horas valle y horas pico**; si el periodo no las tiene, el programa avisa y no simula. El límite es de 4 millones de ciclos en total (ciclos × semáforos × repeticiones), por ejemplo un año completo con 3 repeticiones.
 

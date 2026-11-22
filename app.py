@@ -18,7 +18,7 @@ from simulador.generador import GeneradorCongruencial
 from simulador.mapa import CENTRO_DEFECTO, POSICIONES_DEFECTO, enlaces_google, html_mapa
 from simulador.modelo import Escenario, barrido_demanda, simular, tabla_intervalos
 from simulador.prediccion import (EscenarioPrediccion, MAX_CICLOS_TOTALES, ciclos_estimados,
-                                  ciclos_por_numeros, cubre_valle_y_pico, fin_por_ciclos, predecir,
+                                  cubre_valle_y_pico, predecir,
                                   texto_horas_pico)
 from simulador.pruebas import prueba_frecuencias, prueba_ks, prueba_promedios
 from simulador.reportes import (reporte_bloques, reporte_bloques_ciclos, reporte_horas,
@@ -47,59 +47,106 @@ def legible(df):
 # Barra lateral: periodo a predecir
 # ---------------------------------------------------------------------------
 st.sidebar.title("🚦 Predicción")
-modo = st.sidebar.radio("Definir la simulación por", ["Fechas y horas", "Cantidad de ciclos",
-                                                      "Cantidad de números pseudoaleatorios"])
-with st.sidebar.form("parametros"):
-    hoy = date.today()
-    st.markdown("**Periodo a predecir**")
-    c1, c2 = st.columns(2)
-    f_ini = c1.date_input("Desde el día", hoy, format="DD/MM/YYYY")
-    h_ini = c2.time_input("a las", time(6, 0), step=timedelta(minutes=30))
-    n_ciclos = n_numeros = None
-    if modo == "Fechas y horas":
-        c1, c2 = st.columns(2)
-        f_fin = c1.date_input("Hasta el día", hoy, format="DD/MM/YYYY")
-        h_fin = c2.time_input("a las ", time(20, 0), step=timedelta(minutes=30))
-    elif modo == "Cantidad de ciclos":
-        n_ciclos = st.number_input("Ciclos por semáforo", 10, 2_000_000, 500, step=50,
-                                   help="Cuántas veces se repite verde → rojo en cada semáforo")
-    else:
-        n_numeros = st.number_input("Números pseudoaleatorios a generar", 1_000, 50_000_000, 100_000, step=10_000,
-                                    help="Cada ciclo de cada semáforo usa 2 números (U1 y U2)")
+# --- Los 3 parámetros enlazados: periodo ↔ ciclos ↔ números pseudoaleatorios -------------------
+DUR_CICLO = {s: semaforos[s].verde + semaforos[s].rojo for s in SEMAFOROS}
 
-    st.markdown("**Números pseudoaleatorios**")
-    repeticiones = st.number_input("Repeticiones de la simulación", 1, 200, 10,
-                                   help="Cada repetición usa números pseudoaleatorios distintos. "
-                                        "El resultado es el promedio de todas.")
-    semilla = st.number_input("Semilla del generador", 1, 2_147_483_646, 12345, step=1)
 
-    st.markdown("**Escenario**")
-    factor = st.slider("Demanda (1.0 = la observada)", 0.5, 3.0, 1.0, step=0.1,
-                       help="1.2 significa que llegan 20 % más carros que en la toma de datos")
-    simular_btn = st.form_submit_button("▶ Simular", type="primary", use_container_width=True)
+def ciclos_en(segundos: float) -> dict:
+    """Ciclos completos de cada semáforo en el periodo: segundos ÷ duración del ciclo."""
+    return {s: int(segundos // DUR_CICLO[s]) for s in SEMAFOROS}
 
-st.sidebar.markdown("**Restricciones fijas del cruce**")
-st.sidebar.dataframe(pd.DataFrame([{"Semáforo": f"{s} {semaforos[s].ubicacion}", "Verde": f"{semaforos[s].verde} s",
-                                    "Rojo": f"{semaforos[s].rojo} s"} for s in SEMAFOROS]),
-                     hide_index=True, use_container_width=True)
-st.sidebar.caption(f"Horas pico (fijas): {texto_horas_pico()}. El resto del día es hora valle. "
-                   "Toda simulación debe incluir horas valle y horas pico.")
 
+def segundos_para(ciclos_totales: int) -> int:
+    """Menor duración (en minutos enteros) en la que caben al menos esos ciclos entre los 4 semáforos."""
+    seg = int(ciclos_totales / sum(1 / c for c in DUR_CICLO.values()))
+    seg = -(-seg // 60) * 60
+    while sum(ciclos_en(seg).values()) < ciclos_totales:
+        seg += 60
+    return seg
+
+
+def _inicio():
+    ss = st.session_state
+    return datetime.combine(ss.f_ini, ss.h_ini)
+
+
+def _fijar_fin(fin):
+    ss = st.session_state
+    ss.f_fin, ss.h_fin = fin.date(), fin.time().replace(second=0, microsecond=0)
+
+
+def _desde_periodo():
+    ss = st.session_state
+    seg = max(0, (datetime.combine(ss.f_fin, ss.h_fin) - _inicio()).total_seconds())
+    ss.ciclos = sum(ciclos_en(seg).values())
+    ss.numeros = 2 * ss.ciclos * ss.repeticiones
+
+
+def _desde_ciclos():
+    ss = st.session_state
+    _fijar_fin(_inicio() + timedelta(seconds=segundos_para(max(4, ss.ciclos))))
+    _desde_periodo()
+
+
+def _desde_numeros():
+    ss = st.session_state
+    ss.ciclos = max(4, -(-ss.numeros // (2 * ss.repeticiones)))
+    _desde_ciclos()
+
+
+ss = st.session_state
+if "f_ini" not in ss:
+    ss.f_ini, ss.h_ini = date.today(), time(6, 0)
+    ss.f_fin, ss.h_fin = date.today(), time(20, 0)
+    ss.repeticiones = 10
+    _desde_periodo()
+
+sb = st.sidebar
+sb.markdown("**1. Periodo (fechas y horas)**")
+c1, c2 = sb.columns(2)
+c1.date_input("Desde el día", key="f_ini", format="DD/MM/YYYY", on_change=_desde_periodo)
+c2.time_input("a las", key="h_ini", step=timedelta(minutes=30), on_change=_desde_periodo)
+c1, c2 = sb.columns(2)
+c1.date_input("Hasta el día", key="f_fin", format="DD/MM/YYYY", on_change=_desde_periodo)
+c2.time_input("a las ", key="h_fin", step=timedelta(minutes=30), on_change=_desde_periodo)
+sb.markdown("**2. Ciclos** (los 4 semáforos)")
+sb.number_input("Ciclos totales", min_value=4, max_value=MAX_CICLOS_TOTALES, step=100, key="ciclos",
+                on_change=_desde_ciclos,
+                help="Ciclos completos (verde → rojo) que caben en el periodo, sumando los 4 semáforos. "
+                     "Si lo cambia, la hora final se ajusta.")
+sb.markdown("**3. Números pseudoaleatorios**")
+sb.number_input("Números a generar", min_value=8, max_value=2 * MAX_CICLOS_TOTALES, step=1000, key="numeros",
+                on_change=_desde_numeros,
+                help="Cada ciclo usa 2 números (U1 y U2) en cada repetición: números = 2 × ciclos × repeticiones. "
+                     "Si lo cambia, se ajustan los ciclos y la hora final.")
+sb.number_input("Repeticiones de la simulación", 1, 200, key="repeticiones", on_change=_desde_periodo,
+                help="Cada repetición usa números pseudoaleatorios distintos. El resultado es el promedio.")
+
+inicio = _inicio()
+fin = datetime.combine(ss.f_fin, ss.h_fin)
+seg_periodo = max(0, (fin - inicio).total_seconds())
+por_sem = ciclos_en(seg_periodo)
+sb.caption(f"Periodo de {mil(seg_periodo / 3600, 2)} h → ciclos por semáforo: "
+           + ", ".join(f"{s} {mil(por_sem[s])} (÷{DUR_CICLO[s]} s)" for s in SEMAFOROS)
+           + f" = **{mil(sum(por_sem.values()))}** ciclos × 2 × {ss.repeticiones} repeticiones = "
+             f"**{mil(2 * sum(por_sem.values()) * ss.repeticiones)}** números.")
+
+sb.markdown("**Escenario**")
+semilla = sb.number_input("Semilla del generador", 1, 2_147_483_646, 12345, step=1)
+factor = sb.slider("Demanda (1.0 = la observada)", 0.5, 3.0, 1.0, step=0.1,
+                   help="1.2 significa que llegan 20 % más carros que en la toma de datos")
+simular_btn = sb.button("▶ Simular", type="primary", use_container_width=True)
+
+sb.markdown("**Restricciones fijas del cruce**")
+sb.dataframe(pd.DataFrame([{"Semáforo": f"{s} {semaforos[s].ubicacion}", "Verde": f"{semaforos[s].verde} s",
+                            "Rojo": f"{semaforos[s].rojo} s"} for s in SEMAFOROS]),
+             hide_index=True, use_container_width=True)
+sb.caption(f"Horas pico (fijas): {texto_horas_pico()}. El resto del día es hora valle. "
+           "Toda simulación debe incluir horas valle y horas pico.")
+
+repeticiones = int(ss.repeticiones)
 verdes = None
-inicio = datetime.combine(f_ini, h_ini)
-ciclos_fijos = None
-if modo == "Fechas y horas":
-    fin = datetime.combine(f_fin, h_fin)
-elif modo == "Cantidad de ciclos":
-    ciclos_fijos = int(n_ciclos)
-else:
-    ciclos_fijos = ciclos_por_numeros(int(n_numeros), int(repeticiones))
-    if ciclos_fijos < 1:
-        st.sidebar.error("Con esa cantidad de números no alcanza para un ciclo. Suba los números o baje las repeticiones.")
-        st.stop()
-if ciclos_fijos:
-    fin = fin_por_ciclos(semaforos, inicio, ciclos_fijos)
-esc = EscenarioPrediccion(inicio, fin, int(repeticiones), int(semilla), factor, verdes, ciclos_fijos)
+esc = EscenarioPrediccion(inicio, fin, repeticiones, int(semilla), factor, verdes)
 
 if simular_btn or "resultado" not in st.session_state:
     if fin <= inicio:
@@ -114,13 +161,15 @@ if simular_btn or "resultado" not in st.session_state:
         st.stop()
     est = ciclos_estimados(semaforos, esc)
     if est > MAX_CICLOS_TOTALES:
-        st.sidebar.error(f"Son {mil(est)} ciclos en total (rango × repeticiones). El máximo es "
-                         f"{mil(MAX_CICLOS_TOTALES)}. Reduzca el rango o las repeticiones.")
+        st.error(f"Son {mil(est)} ciclos a simular (ciclos × repeticiones). El máximo es "
+                 f"{mil(MAX_CICLOS_TOTALES)}. Reduzca el periodo, los ciclos, los números o las repeticiones.")
         st.stop()
     with st.spinner("Simulando…"):
         st.session_state.resultado = predecir(semaforos, esc)
 
 res = st.session_state.resultado
+if (res.escenario.inicio, res.escenario.fin, res.escenario.repeticiones) != (inicio, fin, repeticiones):
+    st.warning("Cambió los parámetros de la barra lateral. Dé clic en **▶ Simular** para actualizar los resultados.")
 e = res.escenario
 sem_rep = reporte_semaforos(res)
 vp = reporte_valle_pico(res)
@@ -130,9 +179,10 @@ ic_total = (res.horas.groupby("repeticion")["pasan"].sum().std(ddof=1) * 1.96 / 
 horas_sim = (e.fin - e.inicio).total_seconds() / 3600
 
 st.title("Simulador del cruce vial · vía Mesa–Girardot")
-st.caption(f"Predicción del {e.inicio:%d/%m/%Y %H:%M} al {e.fin:%d/%m/%Y %H:%M} · "
-           f"{e.repeticiones} repeticiones · semilla {e.semilla} · "
-           f"{mil(res.numeros_usados)} números pseudoaleatorios")
+st.caption(f"Periodo: {e.inicio:%d/%m/%Y %H:%M} a {e.fin:%d/%m/%Y %H:%M} · "
+           f"Ciclos: {mil(res.info_semaforos['ciclos'].sum())} · "
+           f"Números pseudoaleatorios: {mil(res.numeros_usados)} · "
+           f"{e.repeticiones} repeticiones · semilla {e.semilla}")
 
 tabs = st.tabs(["Predicción", "Reportes", "Mapa en vivo", "¿Cuánto aguanta el cruce?",
                 "Validación", "Datos de campo", "Generador y pruebas", "Cómo funciona"])
@@ -377,8 +427,12 @@ with tabs[6]:
 # ---------------------------------------------------------------------------
 with tabs[7]:
     st.markdown(f"""
-**Periodo.** Se define por fechas y horas, por cantidad de ciclos o por cantidad de números pseudoaleatorios
-(cada ciclo usa 2: `ciclos por semáforo = números ÷ (2 × 4 × repeticiones)`). Toda simulación debe incluir horas
+**Los 3 parámetros van enlazados en toda simulación.**
+- Periodo → ciclos: cada semáforo cumple `ciclos = segundos del periodo ÷ duración de su ciclo` (124, 129, 124 y 134 s).
+  Los ciclos totales son la suma de los 4.
+- Ciclos → números: cada ciclo usa 2 números (U1 y U2) en cada repetición:
+  `números = 2 × ciclos totales × repeticiones`.
+- Si se cambian los ciclos o los números, la hora final se ajusta para que todo cuadre. Toda simulación debe incluir horas
 valle y horas pico. Los semáforos y sus tiempos son fijos. Cada ciclo de cada semáforo se ubica en el reloj: si empieza en hora pico ({texto_horas_pico()}) se usan los datos de hora pico; si no,
 los de hora valle.
 
