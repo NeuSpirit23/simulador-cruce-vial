@@ -12,14 +12,25 @@ import json
 
 import pandas as pd
 
-# Ubicación del cruce (editable desde la app). Cada semáforo se dibuja a cierta
-# distancia del centro, en la dirección "rumbo" (grados: 0 = norte, 90 = este).
-CENTRO_DEFECTO = (4.30360, -74.80300)
-RUMBOS_DEFECTO = {"S1": 0, "S2": 90, "S3": 180, "S4": 270}
+# Cruce de la Carrera 10 con la Avenida Ciudad de las Acacias (Girardot).
+# Ubicaciones tomadas de Google Maps según lo marcado por el grupo.
+# "rumbo" = dirección desde la que llegan los carros a ese semáforo
+# (grados: 0 = norte, 90 = este, 180 = sur, 270 = oeste). La cola se dibuja hacia allá.
+CENTRO_DEFECTO = (4.3073408, -74.8036605)
+POSICIONES_DEFECTO = {
+    "S1": {"lat": 4.3073810, "lon": -74.8035961, "rumbo": 95,
+           "via": "Av. Ciudad de las Acacias, llegando desde el oriente"},
+    "S2": {"lat": 4.3073876, "lon": -74.8037249, "rumbo": 341,
+           "via": "Carrera 10, llegando desde el norte"},
+    "S3": {"lat": 4.3072873, "lon": -74.8036981, "rumbo": 282,
+           "via": "Av. Ciudad de las Acacias, llegando desde el occidente"},
+    "S4": {"lat": 4.3069530, "lon": -74.8033923, "rumbo": 158,
+           "via": "Carrera 10, llegando desde el sur (Calle 33)"},
+}
 
 
 def html_mapa(ciclos: pd.DataFrame, info: pd.DataFrame, centro: tuple[float, float],
-              rumbos: dict[str, float], inicio_texto: str, alto: int = 620) -> str:
+              posiciones: dict[str, dict], inicio_texto: str, alto: int = 620) -> str:
     semaforos = []
     desfase = 0
     for _, r in info.iterrows():
@@ -27,7 +38,8 @@ def html_mapa(ciclos: pd.DataFrame, info: pd.DataFrame, centro: tuple[float, flo
         d = ciclos[ciclos["semaforo"] == s].sort_values("ciclo")
         semaforos.append({
             "id": s, "nombre": r["ubicacion"], "verde": int(r["verde_s"]), "ciclo": int(r["ciclo_s"]),
-            "desfase": desfase, "rumbo": float(rumbos.get(s, 0)),
+            "desfase": desfase, "rumbo": float(posiciones[s]["rumbo"]),
+            "lat": float(posiciones[s]["lat"]), "lon": float(posiciones[s]["lon"]),
             "espera": d["en_espera"].astype(int).tolist(),
             "pasan": d["pasan"].astype(int).tolist(),
             "quedan": d["quedan"].astype(int).tolist(),
@@ -78,7 +90,12 @@ function mover(lat, lon, rumbo, metros) {{
 
 const tablero = document.getElementById('tablero');
 const S = D.semaforos.map(s => {{
-  const pos = mover(D.centro[0], D.centro[1], s.rumbo, 14);
+  const pos = [s.lat, s.lon];
+  // dirección y distancia hacia el centro del cruce (por donde salen los carros)
+  const dN = (D.centro[0] - s.lat) * 111320;
+  const dE = (D.centro[1] - s.lon) * 111320 * Math.cos(s.lat * Math.PI / 180);
+  s.salida = Math.atan2(dE, dN) * 180 / Math.PI;
+  s.recorrido = Math.hypot(dN, dE) + 20;
   const luz = L.circleMarker(pos, {{radius:9, color:'#000', weight:2, fillColor:'#d33', fillOpacity:1}}).addTo(mapa);
   const r = ((s.rumbo % 360) + 360) % 360;
   const dir = r < 45 || r >= 315 ? 'top' : r < 135 ? 'right' : r < 225 ? 'bottom' : 'left';
@@ -144,9 +161,10 @@ function actualizar(dtReal) {{
     s.luz.setStyle({{fillColor: e.verde ? '#2ecc40' : '#d33'}});
     s.moviendo = s.moviendo.filter(c => {{
       c.t += dtReal;
-      const p = mover(s.pos[0], s.pos[1], s.rumbo + 180, 28 * Math.min(c.t / 1.2, 1));
+      const dur = 0.8 + s.recorrido / 40;
+      const p = mover(s.pos[0], s.pos[1], s.salida, s.recorrido * Math.min(c.t / dur, 1));
       c.m.setLatLng(p);
-      if (c.t > 1.2) {{ mapa.removeLayer(c.m); return false; }}
+      if (c.t > dur) {{ mapa.removeLayer(c.m); return false; }}
       return true;
     }});
     const ciclo = e.k < 0 ? '–' : Math.min(e.k + 1, s.pasan.length);

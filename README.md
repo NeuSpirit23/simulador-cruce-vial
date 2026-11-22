@@ -53,7 +53,7 @@ En la barra lateral se escoge **desde qué día y hora hasta qué día y hora** 
 | **Generador y pruebas** | El generador congruencial y las pruebas de promedios, frecuencias y Kolmogorov-Smirnov (Coss Bu, cap. 3). |
 | **Cómo funciona** | La explicación del modelo, paso a paso. |
 
-**Ubicación en el mapa:** en la pestaña *Mapa en vivo* → "Ubicar el cruce" se ponen la latitud y longitud del centro del cruce (en Google Maps se sacan con clic derecho sobre el cruce) y la dirección de cada semáforo. Los valores por defecto están en `simulador/mapa.py`.
+**Ubicación en el mapa:** el cruce es la Carrera 10 con la Av. Ciudad de las Acacias (Girardot). S1 OXXO recibe a los carros que llegan por la avenida desde el oriente, S2 Mesa a los que llegan por la Carrera 10 desde el norte, S3 El Caldero a los que llegan por la avenida desde el occidente y S4 Vía Jumbo a los que llegan por la Carrera 10 desde el sur. En la pestaña *Mapa en vivo* → "Ajustar la ubicación" se pueden cambiar la latitud y longitud del centro del cruce (en Google Maps se sacan con clic derecho sobre el cruce) y la dirección de cada semáforo. Los valores por defecto están en `simulador/mapa.py`.
 
 ---
 

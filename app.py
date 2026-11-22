@@ -15,7 +15,7 @@ from simulador.datos import PERIODOS, SEMAFOROS, calcular_llegadas, cargar_semaf
 from simulador.exportar import (NOMBRES, excel_datos_campo, excel_prediccion, pdf_datos_campo,
                                 pdf_prediccion)
 from simulador.generador import GeneradorCongruencial
-from simulador.mapa import CENTRO_DEFECTO, RUMBOS_DEFECTO, html_mapa
+from simulador.mapa import CENTRO_DEFECTO, POSICIONES_DEFECTO, html_mapa
 from simulador.modelo import Escenario, barrido_demanda, simular, tabla_intervalos
 from simulador.prediccion import (EscenarioPrediccion, MAX_CICLOS_TOTALES, ciclos_estimados,
                                   predecir, texto_horas_pico)
@@ -190,19 +190,26 @@ with tabs[2]:
     st.markdown("Animación de la simulación sobre el mapa satelital: los puntos amarillos son carros en cola "
                 "y los verdes son carros que pasan. Los semáforos se ponen en verde uno tras otro "
                 "(S1 → S2 → S3 → S4). Se reproduce la repetición 1 desde el inicio del periodo.")
-    with st.expander("Ubicar el cruce y los semáforos en el mapa"):
+    with st.expander("Ajustar la ubicación del cruce y de los semáforos"):
+        st.caption("Cruce de la Carrera 10 con la Av. Ciudad de las Acacias (Girardot). Para sacar coordenadas: "
+                   "en Google Maps, clic derecho sobre el punto y clic en los números (se copian). "
+                   "Dirección = de dónde llegan los carros: 0 = norte, 90 = este, 180 = sur, 270 = oeste.")
         c1, c2 = st.columns(2)
-        lat = c1.number_input("Latitud del centro del cruce", value=CENTRO_DEFECTO[0], format="%.6f")
-        lon = c2.number_input("Longitud del centro del cruce", value=CENTRO_DEFECTO[1], format="%.6f")
-        st.caption("Para sacar las coordenadas: en Google Maps, clic derecho sobre el centro del cruce y "
-                   "clic en los números que aparecen arriba (se copian).")
-        cols = st.columns(4)
-        rumbos = {s: cols[i].number_input(f"Dirección de {s} (°)", 0, 359, RUMBOS_DEFECTO[s], step=5,
-                                          help="0 = norte, 90 = este, 180 = sur, 270 = oeste")
-                  for i, s in enumerate(SEMAFOROS)}
+        lat = c1.number_input("Latitud del centro del cruce", value=CENTRO_DEFECTO[0], format="%.7f")
+        lon = c2.number_input("Longitud del centro del cruce", value=CENTRO_DEFECTO[1], format="%.7f")
+        posiciones = {}
+        for s_m in SEMAFOROS:
+            d = POSICIONES_DEFECTO[s_m]
+            st.markdown(f"**{s_m} · {semaforos[s_m].ubicacion}** — {d['via']}")
+            c1, c2, c3 = st.columns(3)
+            posiciones[s_m] = {
+                "lat": c1.number_input("Latitud", value=d["lat"], format="%.7f", key=f"lat_{s_m}"),
+                "lon": c2.number_input("Longitud", value=d["lon"], format="%.7f", key=f"lon_{s_m}"),
+                "rumbo": c3.number_input("Dirección (°)", 0, 359, d["rumbo"], step=1, key=f"rumbo_{s_m}"),
+            }
     ciclos_anim = st.slider("Ciclos a animar por semáforo", 5, 60, 20)
     anim = res.ciclos.groupby("semaforo").head(ciclos_anim)
-    components.html(html_mapa(anim, res.info_semaforos, (lat, lon), rumbos,
+    components.html(html_mapa(anim, res.info_semaforos, (lat, lon), posiciones,
                               e.inicio.strftime("%Y-%m-%dT%H:%M:%S")), height=680)
 
 # ---------------------------------------------------------------------------
