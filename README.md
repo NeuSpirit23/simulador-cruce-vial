@@ -54,7 +54,7 @@ Además se escogen las **repeticiones**, la **semilla**, el nivel de demanda y e
 |---|---|
 | **Resumen** | Indicadores (total, margen IC 95 %, valle y pico), resultados por semáforo, cada semáforo en valle y en pico, valle frente a pico y gráficas. Botones para descargar **todo en Excel** y **todo en PDF**. |
 | **Reportes** | Todo junto, siempre con hora valle y hora pico: bloques de horas, por hora, bloques de ciclos, semáforo × periodo, valle frente a pico y el detalle por ciclo de los 4 semáforos. |
-| **Mapa en vivo** | Mapa satelital del cruce con la animación de los carros, y botones de Street View y Google Maps por semáforo. |
+| **Simulación en vivo** | La simulación animada en el **mapa satelital** y en una **maqueta 3D** del cruce, sincronizados. Los carros hacen fila, los semáforos cambian de color y cada carro que pasa gira a la izquierda, sigue derecho o gira a la derecha (al azar, con el generador del curso). En 3D se gira la cámara con el mouse. También hay botones de Street View y Google Maps por semáforo. |
 | **¿Cuánto aguanta el cruce?** | Capacidad en hora valle y en hora pico, y hasta cuánto puede crecer la demanda antes de saturarse. |
 | **Validación** | Compara lo simulado con lo observado (valle y pico) con el error del método de los 11 pasos. |
 | **Datos de campo** | Resumen de los 221 registros, tablas de codificación por intervalos de los 4 semáforos en valle y en pico, y descarga en Excel y PDF. |
@@ -88,6 +88,8 @@ En cada ciclo, para cada semáforo:
 
 ---
 
+> La vista satelital y la 3D cargan sus librerías desde internet (Leaflet, three.js e imágenes de Esri), así que necesitan conexión.
+
 ## Estructura
 
 ```
@@ -99,7 +101,9 @@ simulador/prediccion.py Predicción por rango de fechas y horas con repeticiones
 simulador/reportes.py   Reportes por bloques, por hora, valle vs pico
 simulador/paquete.py    Arma todos los reportes (los mismos en app, Excel y PDF)
 simulador/exportar.py   Exportación a Excel y PDF
-simulador/mapa.py       Mapa satelital con la animación
+simulador/mapa.py       Ubicación del cruce y enlaces de Google Maps / Street View
+simulador/visor.py      Simulación en vivo: mapa satelital + maqueta 3D (Leaflet + three.js)
+simulador/estilo.py     Estilo visual (tema, tarjetas, gráficas)
 simulador/pruebas.py    Pruebas de uniformidad (Coss Bu, cap. 3)
 data/registro_transito.xlsx   Datos de campo
 tests/                  Pruebas automáticas (pytest)
