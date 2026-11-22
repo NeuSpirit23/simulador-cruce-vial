@@ -38,3 +38,26 @@ def test_simulacion_se_parece_a_lo_observado():
             obs = sem[r["semaforo"]].pasan[periodo]
             media = sum(obs) / len(obs)
             assert abs(r["pasan_prom"] - media) / media < 0.10
+
+
+def test_prediccion_por_fechas_y_reportes():
+    from datetime import datetime
+
+    from simulador.exportar import excel_prediccion, pdf_prediccion
+    from simulador.prediccion import EscenarioPrediccion, predecir
+    from simulador.reportes import reporte_bloques, reporte_horas, reporte_valle_pico
+
+    sem = cargar_semaforos()
+    res = predecir(sem, EscenarioPrediccion(datetime(2026, 11, 23, 6), datetime(2026, 11, 23, 20),
+                                            repeticiones=5))
+    bloques = reporte_bloques(res, 2)
+    assert len(bloques) == 7
+    assert abs(bloques["pct_del_total"].sum() - 100) < 1e-6
+    # los bloques 12–14 y 16–18 incluyen horas pico; los demás no
+    con_pico = bloques[bloques["en_pico"] > 0]["bloque_ini"].dt.hour.tolist()
+    assert con_pico == [12, 16]
+    assert len(reporte_horas(res)) == 14
+    vp = reporte_valle_pico(res).set_index("periodo")
+    assert vp.loc["Pico", "prom_por_hora"] > vp.loc["Valle", "prom_por_hora"]
+    assert excel_prediccion(res, 2)[:2] == b"PK"
+    assert pdf_prediccion(res, 2)[:4] == b"%PDF"

@@ -38,16 +38,22 @@ streamlit run app.py
 
 ## Qué tiene la aplicación
 
+En la barra lateral se escoge **desde qué día y hora hasta qué día y hora** se quiere predecir, cuántas **repeticiones** se hacen con números pseudoaleatorios distintos, la **semilla**, el nivel de demanda y el tiempo en verde de cada semáforo. Después se da clic en **Simular**.
+
+**Horas pico (fijas):** 12:00–13:00 y 17:00–18:00, que son las que se midieron en campo. El resto del día es hora valle.
+
 | Pestaña | Qué muestra |
 |---|---|
-| **Simulación** | Vehículos que pasan y que quedan en cola, ciclo por ciclo, para cada semáforo. |
+| **Predicción** | Total de vehículos que pasan con su margen (IC 95 %), los resultados por semáforo, la comparación valle frente a pico y la gráfica por hora. |
+| **Reportes** | Bloques de horas ajustables (2 h por defecto: 00–02, 02–04…) con cuántos pasan, el % del total y cuántos pasan en horas valle y en horas pico. También tablas por hora y por ciclo. Se descargan en **Excel** y en **PDF**. |
+| **Mapa en vivo** | Mapa satelital del cruce con la animación de los carros en cola y los que pasan, ciclo por ciclo y semáforo por semáforo. |
 | **¿Cuánto aguanta el cruce?** | La capacidad en vehículos por hora y hasta cuánto puede crecer la demanda antes de saturarse. |
-| **Validación** | Compara lo simulado con lo observado en campo usando el error del método de los 11 pasos. |
-| **Datos de campo** | Los 221 registros y la tabla de codificación por intervalos de las llegadas. |
-| **Generador y pruebas** | Generador congruencial y pruebas de promedios, frecuencias y Kolmogorov-Smirnov (Coss Bu, cap. 3). |
+| **Validación** | Compara lo simulado con lo observado usando el error del método de los 11 pasos. |
+| **Datos de campo** | Los 221 registros (se descargan en Excel y PDF) y las tablas de codificación por intervalos. |
+| **Generador y pruebas** | El generador congruencial y las pruebas de promedios, frecuencias y Kolmogorov-Smirnov (Coss Bu, cap. 3). |
 | **Cómo funciona** | La explicación del modelo, paso a paso. |
 
-En la barra lateral se escoge: hora valle o pico, número de ciclos, semilla, nivel de demanda y el tiempo en verde de cada semáforo.
+**Ubicación en el mapa:** en la pestaña *Mapa en vivo* → "Ubicar el cruce" se ponen la latitud y longitud del centro del cruce (en Google Maps se sacan con clic derecho sobre el cruce) y la dirección de cada semáforo. Los valores por defecto están en `simulador/mapa.py`.
 
 ---
 
@@ -66,7 +72,9 @@ En cada ciclo, para cada semáforo:
 **Capacidad por hora** = capacidad por verde × (3600 ÷ duración del ciclo).
 **Uso de la capacidad** = llegadas promedio por ciclo ÷ capacidad por verde. Si llega al 100 %, el semáforo se satura.
 
-**Supuestos:** se cuenta el total de vehículos por semáforo (no se separan giros), no se miden amarillo ni despeje, y cada semáforo se simula por separado.
+**Periodo y repeticiones.** Cada ciclo se ubica en el reloj: si empieza en hora pico usa las tablas de hora pico y, si no, las de hora valle. Todo se repite R veces y se reporta el promedio con su intervalo de confianza del 95 %: `promedio ± 1,96 · desviación estándar ÷ √R`.
+
+**Supuestos:** se cuenta el total de vehículos por semáforo (no se separan giros), no se miden amarillo ni despeje, y cada semáforo se simula por separado. Las horas que no se midieron (noche, madrugada, fines de semana) se tratan como hora valle.
 
 ---
 
@@ -77,6 +85,10 @@ app.py                  Aplicación web (Streamlit)
 simulador/datos.py      Lectura del Excel y cálculo de llegadas
 simulador/generador.py  Generador congruencial
 simulador/modelo.py     Tablas de intervalos y simulación por ciclos
+simulador/prediccion.py Predicción por rango de fechas y horas con repeticiones
+simulador/reportes.py   Reportes por bloques, por hora, valle vs pico
+simulador/exportar.py   Exportación a Excel y PDF
+simulador/mapa.py       Mapa satelital con la animación
 simulador/pruebas.py    Pruebas de uniformidad (Coss Bu, cap. 3)
 data/registro_transito.xlsx   Datos de campo
 tests/                  Pruebas automáticas (pytest)
