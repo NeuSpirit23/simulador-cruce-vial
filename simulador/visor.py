@@ -56,7 +56,7 @@ _PLANTILLA = r"""<!DOCTYPE html><html><head><meta charset="utf-8">
   <option value="1">×1 tiempo real</option><option value="3">×3</option><option value="5" selected>×5</option>
   <option value="10">×10</option><option value="20">×20</option><option value="40">×40</option></select></label>
  <div class="seg" id="modo"><button data-m="mapa">🗺️ Mapa</button><button data-m="ambos" class="on">Ambos</button><button data-m="tres">🧊 3D</button></div>
- <span id="reloj"></span>
+ <span id="fases" style="font-size:12px;opacity:.85"></span><span id="reloj"></span>
 </div>
 <div id="vistas"><div id="mapa"></div><div id="tres"><div id="aviso3d">Cargando vista 3D…</div></div></div>
 <div id="tablero"></div>
@@ -130,19 +130,20 @@ function estado(s, t){
   if (k >= s.espera.length) return {k, verde:false, cola:s.quedan[s.quedan.length-1], salidos:0, fin:true};
   const antes = k > 0 ? s.quedan[k-1] : 0;
   if (u < rojo) return {k, verde:false, cola:Math.round(antes + (s.espera[k]-antes)*u/rojo), salidos:0};
-  const salidos = Math.min(s.pasan[k], Math.floor(s.pasan[k]*(u-rojo)/s.verde + 1e-9));
+  const util = Math.max(1, s.verde - MARGEN);                // los últimos salen antes de que acabe el verde
+  const salidos = Math.min(s.pasan[k], Math.floor(s.pasan[k]*(u-rojo)/util + 1e-9));
   return {k, verde:true, cola:s.espera[k]-salidos, salidos};
 }
-const MAX_COLA = 28, VEL = 9;                 // carros dibujados por cola; velocidad visual (m/s)
+const MAX_COLA = 28, VEL = 12, MARGEN = 1.5;  // carros dibujados por cola; velocidad (m/s ≈ 43 km/h); margen de salida (s)
 const slot = (s, i) => pEntrada(s, s.pare + 1.5 + i*6.2);
 
 let t = 0, corriendo = false, ultimo = null;
-const tFinal = Math.max(...S.map(s => s.desfase + s.verde - s.ciclo + s.ciclo*s.espera.length));
+const tFinal = Math.max(...S.map(s => s.desfase + s.verde - s.ciclo + s.ciclo*s.espera.length)) + D.despeje + 8;
 const vistas = [];                            // renderizadores (mapa y 3D)
 
 function paso(dtReal){
   const vel = Number(document.getElementById('vel').value);
-  const dtMov = dtReal * Math.min(vel, 12);
+  const dtMov = dtReal * vel;                  // todo se mueve con el reloj de la simulación
   S.forEach(s => {
     const e = estado(s, t);
     if (e.k !== s.ultimoCiclo){
@@ -156,7 +157,7 @@ function paso(dtReal){
       const r = U(); const d = s.destinos.find(x => r < x.hasta) || s.destinos[s.destinos.length-1];
       s.giros[d.tipo]++;
       const c = s.cola.shift() || {id: Math.random()};
-      c.ruta = d.ruta; c.tipo = d.tipo; c.d = 0;
+      c.ruta = d.ruta; c.tipo = d.tipo; c.t0 = t; c.d = 0;
       s.moviendo.push(c);
     }
     // la cola visible sigue al conteo de la simulación
@@ -164,9 +165,9 @@ function paso(dtReal){
     while (s.cola.length < objetivo){ const i = s.cola.length; const p = pEntrada(s, s.pare + 60 + i*6.2);
       s.cola.push({id: Math.random(), x:p[0], y:p[1], rumbo: rumboDe(s.dentro)}); }
     while (s.cola.length > objetivo) s.cola.pop();
-    s.cola.forEach((c, i) => { const p = slot(s, i), f = Math.min(1, dtMov*1.6);
+    s.cola.forEach((c, i) => { const p = slot(s, i), f = Math.min(1, dtMov*1.2);
       c.x += (p[0]-c.x)*f; c.y += (p[1]-c.y)*f; c.rumbo = rumboDe(s.dentro); c.tipo = "cola"; });
-    s.moviendo = s.moviendo.filter(c => { c.d += VEL*dtMov; if (c.d >= c.ruta.largo) return false;
+    s.moviendo = s.moviendo.filter(c => { c.d = VEL*(t - c.t0); if (c.d >= c.ruta.largo) return false;
       const q = enRuta(c.ruta, c.d); c.x = q.p[0]; c.y = q.p[1]; c.rumbo = q.rumbo; return true; });
   });
   vistas.forEach(v => v.dibujar());
@@ -175,6 +176,8 @@ function paso(dtReal){
 
 function hora(seg){ const d = new Date(new Date(D.inicio).getTime() + seg*1000);
   return d.toLocaleString('es-CO', {weekday:'short', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit'}); }
+document.getElementById('fases').textContent = 'Ciclo del cruce ' + Math.round(D.cicloComun) + ' s: '
+  + S.map(s => s.id + ' ' + s.verde + ' s').join(' → ') + ' · todo rojo ' + D.despeje.toFixed(2).replace('.', ',') + ' s entre fases';
 const tab = document.getElementById('tablero');
 S.forEach(s => { s.tarjeta = document.createElement('div'); s.tarjeta.className = 'tarjeta'; tab.appendChild(s.tarjeta); });
 const tarjTot = document.createElement('div'); tarjTot.className = 'tarjeta'; tab.appendChild(tarjTot);
@@ -185,11 +188,14 @@ function tablero(){
     ['izq','recto','der'].forEach(k => g[k] += s.giros[k]);
     const col = s.enVerde ? '#22c55e' : '#ef4444';
     s.tarjeta.innerHTML = `<b class="t"><span class="luz" style="background:${col};color:${col}"></span>${s.id} · ${s.nombre}</b>
-      Ciclo <span class="num">${e.k < 0 ? '–' : Math.min(e.k+1, s.pasan.length)}</span> de ${s.pasan.length} · ${s.enVerde ? 'VERDE' : 'ROJO'}<br>
+      Ciclo <span class="num">${e.k < 0 ? '–' : Math.min(e.k+1, s.pasan.length)}</span> de ${s.pasan.length} · ${s.enVerde ? 'VERDE' : 'ROJO'} · verde ${s.verde} s<br>
       En cola <span class="num">${e.cola}</span> · pasando <span class="num">${ahora}</span><br>
       Total que han pasado <span class="num">${s.total + ahora}</span><br>
       <span style="color:#6b7280">↰ ${s.giros.izq} · ↑ ${s.giros.recto} · ↱ ${s.giros.der}</span>`; });
-  tarjTot.innerHTML = `<b class="t">Cruce completo</b>Han pasado <span class="num">${tot}</span> vehículos<br>
+  const enVerde = S.find(s => s.enVerde);
+  const fase = enVerde ? `<span style="color:#16a34a;font-weight:700">● ${enVerde.id} en verde</span>`
+                       : `<span style="color:#dc2626;font-weight:700">● Todo en rojo (despeje ${D.despeje.toFixed(2).replace('.', ',')} s)</span>`;
+  tarjTot.innerHTML = `<b class="t">Cruce completo</b>${fase}<br>Han pasado <span class="num">${tot}</span> vehículos<br>
     <div class="ley"><span><i class="chip" style="background:${COLOR.izq}"></i>izquierda ${g.izq}</span>
     <span><i class="chip" style="background:${COLOR.recto}"></i>derecho ${g.recto}</span>
     <span><i class="chip" style="background:${COLOR.der}"></i>derecha ${g.der}</span>
@@ -382,8 +388,13 @@ def html_visor(ciclos: pd.DataFrame, info: pd.DataFrame, centro: tuple[float, fl
                prob_giros: dict | None = None, alto_vista: int = 470) -> str:
     """HTML del visor (mapa + 3D). prob_giros = {'izq': %, 'recto': %, 'der': %} (solo visual)."""
     prob = prob_giros or {"izq": 30, "recto": 40, "der": 30}
+    # Un solo ciclo para todo el cruce (el más largo) con las fases en secuencia S1 → S2 → S3 → S4 y un
+    # tiempo de "todo en rojo" (despeje) entre fases, para que nunca haya dos verdes a la vez.
+    ciclo_comun = int(info["ciclo_s"].max())
+    despeje = max(2.0, (ciclo_comun - int(info["verde_s"].sum())) / len(info))
+    ciclo_comun = int(info["verde_s"].sum()) + despeje * len(info)
     semaforos = []
-    desfase = 0
+    desfase = 0.0
     for _, r in info.iterrows():
         s = r["semaforo"]
         d = ciclos[ciclos["semaforo"] == s].sort_values("ciclo")
@@ -393,13 +404,14 @@ def html_visor(ciclos: pd.DataFrame, info: pd.DataFrame, centro: tuple[float, fl
         u = (math.sin(math.radians(rumbo)), math.cos(math.radians(rumbo)))
         pare = max(9.0, x * u[0] + y * u[1])          # distancia de la línea de pare al centro, sobre la calle
         semaforos.append({
-            "id": s, "nombre": r["ubicacion"], "verde": int(r["verde_s"]), "ciclo": int(r["ciclo_s"]),
+            "id": s, "nombre": r["ubicacion"], "verde": int(r["verde_s"]), "ciclo": ciclo_comun,
+            "cicloReal": int(r["ciclo_s"]),
             "desfase": desfase, "rumbo": rumbo, "x": x, "y": y, "pare": pare,
             "espera": d["en_espera"].astype(int).tolist(), "pasan": d["pasan"].astype(int).tolist(),
             "quedan": d["quedan"].astype(int).tolist(),
         })
-        desfase += int(r["verde_s"])
+        desfase += int(r["verde_s"]) + despeje
     datos = {"centro": list(centro), "semaforos": semaforos, "inicio": inicio_texto,
-             "semilla": int(semilla), "prob": prob}
+             "semilla": int(semilla), "prob": prob, "cicloComun": ciclo_comun, "despeje": despeje}
     return (_PLANTILLA.replace("__DATOS__", json.dumps(datos))
             .replace("__ALTO_VISTA__", str(alto_vista)))

@@ -365,7 +365,10 @@ with tabs[2]:
     p_izq = c2.slider("% gira a la izquierda", 0, 100, 30, step=5)
     p_der = c3.slider("% gira a la derecha", 0, 100 - p_izq, min(30, 100 - p_izq), step=5)
     c4.metric("% sigue derecho", f"{100 - p_izq - p_der} %")
-    st.caption("Los porcentajes de giro son solo para la animación: no se midieron en campo y no cambian los conteos.")
+    st.caption("Los porcentajes de giro son solo para la animación: no se midieron en campo y no cambian los conteos. "
+               "En la animación los 4 semáforos comparten un ciclo de 134 s con las fases en orden (S1 25 s → S2 30 s → "
+               "S3 25 s → S4 35 s) y 4,75 s de todo en rojo entre fases, para que nunca haya dos verdes a la vez y el "
+               "cruce quede libre antes del siguiente verde. Los carros que pasan en cada ciclo son los de la simulación.")
     with st.expander("📍 Ajustar la ubicación del cruce y de los semáforos"):
         st.caption("Cruce de la Carrera 10 con la Av. Ciudad de las Acacias (Girardot). Para sacar coordenadas: "
                    "en Google Maps, clic derecho sobre el punto y clic en los números (se copian). "
@@ -386,7 +389,7 @@ with tabs[2]:
     anim = res.ciclos.groupby("semaforo").head(ciclos_anim)
     components.html(html_visor(anim, res.info_semaforos, (lat, lon), posiciones,
                                inicio.strftime("%Y-%m-%dT%H:%M:%S"), semilla,
-                               {"izq": p_izq, "recto": 100 - p_izq - p_der, "der": p_der}), height=720)
+                               {"izq": p_izq, "recto": 100 - p_izq - p_der, "der": p_der}), height=770)
 
     st.markdown(seccion("🛣️", "Vista de la calle (Google Maps)", "Abre en otra pestaña Google Street View desde cada "
                         "semáforo, mirando como el conductor que llega al cruce, o su ubicación en Google Maps."),
