@@ -374,7 +374,32 @@ with tabs[1]:
     st.plotly_chart(fig, use_container_width=True)
     tabla(T[nombre_bc], alto=420)
 
-    st.markdown(seccion("🌗", "4 · Cada semáforo en hora valle y en hora pico", ), unsafe_allow_html=True)
+    st.markdown(seccion("🔥", "Mapa de calor: vehículos por día y hora", pq.notas["Mapa de calor"]), unsafe_allow_html=True)
+    mc = T["Mapa de calor (día × hora)"]
+    figm = px.imshow(mc, aspect="auto", color_continuous_scale="YlOrRd", labels=dict(x="Hora del día", y="Día", color="Vehículos"),
+                     text_auto=".0f" if mc.size <= 24 * 8 else False)
+    figm.update_layout(height=max(260, 70 + 34 * len(mc)))
+    st.plotly_chart(figm, use_container_width=True)
+
+    st.markdown(seccion("📦", "Diagramas de caja: vehículos que pasan por ciclo", pq.notas["Cajas"]), unsafe_allow_html=True)
+    cic = G["ciclos"]
+    figb = px.box(cic, x="semaforo", y="pasan", color="periodo", category_orders={"periodo": ["Valle", "Pico"]},
+                  color_discrete_map={"Valle": VALLE, "Pico": PICO},
+                  labels={"semaforo": "Semáforo", "pasan": "Vehículos que pasan por ciclo", "periodo": ""})
+    figb.update_layout(height=380)
+    st.plotly_chart(figb, use_container_width=True)
+
+    st.markdown(seccion("🚥", "Colas al final de cada verde", pq.notas["Colas"]), unsafe_allow_html=True)
+    c1, c2 = st.columns([1.1, 1])
+    with c1, st.container(border=True):
+        figh = px.histogram(cic, x="quedan", color="semaforo", barmode="group", nbins=int(max(5, cic["quedan"].max() + 1)),
+                            labels={"quedan": "Carros que quedan en cola", "semaforo": "Semáforo", "count": "Ciclos"})
+        figh.update_layout(height=340, yaxis_title="Ciclos", title="Histograma de colas")
+        st.plotly_chart(figh, use_container_width=True)
+    with c2:
+        tabla(T["Colas"], alto=340)
+
+    st.markdown(seccion("🌗", "4 · Cada semáforo en hora valle y en hora pico"), unsafe_allow_html=True)
     tabla(T["Semáforo y periodo"])
     st.markdown(seccion("⚖️", "5 · Hora valle frente a hora pico", ), unsafe_allow_html=True)
     tabla(T["Valle vs pico"])
@@ -486,6 +511,9 @@ with tabs[4]:
     fig.add_bar(name="Simulado", x=etiquetas, y=val["Pasan simulado"])
     fig.update_layout(barmode="group", yaxis_title="Vehículos que pasan por ciclo")
     st.plotly_chart(fig, use_container_width=True)
+    st.markdown(seccion("🧪", "Prueba de ajuste de las llegadas (chi-cuadrado, 99 %)", pq.notas["Prueba de ajuste de llegadas"]),
+                unsafe_allow_html=True)
+    tabla(T["Prueba de ajuste de llegadas"])
 
 # ---------------------------------------------------------------------------
 # 6. Datos de campo

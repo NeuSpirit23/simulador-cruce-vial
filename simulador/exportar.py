@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, LineChart, Reference
+from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
@@ -245,6 +246,25 @@ def excel_paquete(p: Paquete) -> bytes:
     f = _titulo(ws, f"Vehículos que pasan por {nombre_c.lower()}", 1, p.notas[nombre_c])
     _tabla_excel(ws, t[nombre_c], f, filtro=True)
     _anchos(ws)
+
+    # --- Mapa de calor, colas y prueba de ajuste --------------------------------
+    ws = wb.create_sheet("Mapa de calor y colas")
+    ws.sheet_view.showGridLines = False
+    f = _titulo(ws, "Mapa de calor: vehículos por día y hora", 1, p.notas["Mapa de calor"])
+    mc = t["Mapa de calor (día × hora)"].reset_index().rename(columns={"index": "Día"})
+    ini, fin = _tabla_excel(ws, mc, f)
+    if len(mc):
+        rango = f"B{ini + 1}:{get_column_letter(len(mc.columns))}{fin}"
+        ws.conditional_formatting.add(rango, ColorScaleRule(start_type="min", start_color="FFFFE0",
+                                                            mid_type="percentile", mid_value=50, mid_color="FDAE61",
+                                                            end_type="max", end_color="D7191C"))
+    _, fin = _tabla_excel(ws, t["Colas"], fin + 3, titulo="Colas al final de cada verde (repetición 1)")
+    ws.cell(fin + 1, 1, p.notas["Colas"]).font = Font(italic=True, size=9, color="595959")
+    _, fin = _tabla_excel(ws, t["Prueba de ajuste de llegadas"], fin + 3,
+                          titulo="Prueba de ajuste de las llegadas (chi-cuadrado, α = 0,01)")
+    ws.cell(fin + 1, 1, p.notas["Prueba de ajuste de llegadas"]).font = Font(italic=True, size=9, color="595959")
+    _anchos(ws)
+    ws.column_dimensions["A"].width = 18
 
     # --- Capacidad ------------------------------------------------------------
     ws = wb.create_sheet("Capacidad")
@@ -512,6 +532,44 @@ def pdf_paquete(p: Paquete) -> bytes:
     if len(t[nombre_c]) > 300:
         h.append(Paragraph("Se muestran los primeros 300 bloques; el Excel tiene todos.", _NOTA))
 
+    # 4b. Mapa de calor, cajas y colas
+    h.append(PageBreak())
+    h.append(Paragraph("Mapa de calor: vehículos por día y hora", _H1))
+    h.append(Paragraph(p.notas["Mapa de calor"], _NOTA))
+    mc = t["Mapa de calor (día × hora)"]
+    filas_mc = min(len(mc), 31)
+    fig, ax = plt.subplots(figsize=(13, max(1.6, 0.42 * filas_mc + 1)))
+    im = ax.imshow(mc.head(filas_mc).to_numpy(dtype=float), aspect="auto", cmap="YlOrRd")
+    ax.set_xticks(range(24)); ax.set_xticklabels([c[:2] for c in mc.columns], fontsize=7)
+    ax.set_yticks(range(filas_mc)); ax.set_yticklabels(mc.index[:filas_mc], fontsize=7)
+    ax.set_xlabel("Hora del día")
+    fig.colorbar(im, ax=ax, label="Vehículos", fraction=0.025)
+    h.append(_img(fig, 26, min(15, max(3.2, 0.55 * filas_mc + 1.6))))
+    cic = g["ciclos"]
+    fig, axs = plt.subplots(1, 2, figsize=(13, 3.8))
+    datos, etiquetas, colores = [], [], []
+    for s in SEMAFOROS:
+        for per, col in (("Valle", COLOR_VALLE), ("Pico", COLOR_PICO)):
+            d = cic[(cic["semaforo"] == s) & (cic["periodo"] == per)]["pasan"]
+            if len(d):
+                datos.append(d.to_numpy()); etiquetas.append(f"{s}\n{per}"); colores.append(col)
+    bp = axs[0].boxplot(datos, patch_artist=True, tick_labels=etiquetas)
+    for caja, col in zip(bp["boxes"], colores):
+        caja.set_facecolor(col); caja.set_alpha(0.75)
+    axs[0].set_title("Vehículos que pasan por ciclo", fontsize=10); axs[0].tick_params(labelsize=7)
+    _estilo_ax(axs[0])
+    maxq = int(cic["quedan"].max()) if len(cic) else 1
+    for s in SEMAFOROS:
+        d = cic[cic["semaforo"] == s]["quedan"]
+        axs[1].hist(d, bins=range(0, maxq + 2), alpha=0.55, label=s, color=COLORES_SEM[s])
+    axs[1].set_title("Histograma de colas al final del verde", fontsize=10)
+    axs[1].set_xlabel("Carros en cola"); axs[1].set_ylabel("Ciclos"); axs[1].legend(fontsize=8)
+    _estilo_ax(axs[1])
+    h.append(Paragraph("Diagramas de caja e histograma de colas", _H1))
+    h.append(Paragraph(p.notas["Cajas"] + " " + p.notas["Colas"], _NOTA))
+    h.append(_img(fig, 26, 7.4))
+    h.append(_tabla_pdf(t["Colas"], W))
+
     # 5. Capacidad y validación
     h.append(PageBreak())
     h.append(Paragraph("¿Cuánto aguanta el cruce? (hora valle y hora pico)", _H1))
@@ -533,6 +591,9 @@ def pdf_paquete(p: Paquete) -> bytes:
     h.append(_img(fig, 26, 6.8))
     h.append(KeepTogether([Paragraph("Validación: simulado frente a observado", _H1),
                            Paragraph(p.notas["Validación"], _NOTA), _tabla_pdf(t["Validación"], W * 0.75)]))
+    h.append(KeepTogether([Paragraph("Prueba de ajuste de las llegadas (chi-cuadrado, 99 %)", _H1),
+                           Paragraph(p.notas["Prueba de ajuste de llegadas"], _NOTA),
+                           _tabla_pdf(t["Prueba de ajuste de llegadas"], W)]))
 
     # 6. Números pseudoaleatorios
     h.append(PageBreak())

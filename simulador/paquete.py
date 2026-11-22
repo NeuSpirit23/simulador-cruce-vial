@@ -155,6 +155,81 @@ def precision(res: ResultadoPrediccion) -> tuple[pd.DataFrame, pd.DataFrame]:
     return pd.DataFrame(filas), conv
 
 
+def mapa_calor(res: ResultadoPrediccion) -> pd.DataFrame:
+    """Vehículos que pasan por día (filas) y hora del día (columnas), promedio de las repeticiones."""
+    h = res.horas.copy()
+    h["dia"] = h["hora"].dt.normalize()
+    h["h"] = h["hora"].dt.hour
+    t = h.groupby(["repeticion", "dia", "h"])["pasan"].sum().groupby(["dia", "h"]).mean().unstack("h")
+    t = t.reindex(columns=range(24))
+    dias = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+    t.index = [f"{dias[d.weekday()]} {d:%d/%m/%Y}" for d in t.index]
+    t.columns = [f"{c:02d}:00" for c in t.columns]
+    return t
+
+
+def colas(res: ResultadoPrediccion) -> pd.DataFrame:
+    """Cola que queda al final de cada ciclo (repetición 1): promedio, percentil 95 y máximo."""
+    c = res.ciclos
+    filas = []
+    for s_ in SEMAFOROS:
+        for p in PERIODOS + ["Todo"]:
+            d = c[(c["semaforo"] == s_) & ((c["periodo"] == p) | (p == "Todo"))]["quedan"]
+            if d.empty:
+                continue
+            filas.append({"Semáforo": s_, "Periodo": p, "Ciclos": len(d), "Cola prom. (veh)": d.mean(),
+                          "Percentil 95 (veh)": d.quantile(0.95), "Máxima (veh)": int(d.max()),
+                          "% de ciclos con cola": 100 * (d > 0).mean()})
+    return pd.DataFrame(filas)
+
+
+def prueba_ajuste_llegadas(res: ResultadoPrediccion, semaforos: dict[str, DatosSemaforo],
+                           alfa: float = 0.01) -> pd.DataFrame:
+    """¿Las llegadas que generó el simulador siguen la distribución observada en campo?
+
+    Para cada semáforo y periodo (repetición 1):
+      FO = cuántos ciclos simulados tuvieron cada cantidad de llegadas
+      FE = total de ciclos × probabilidad observada en campo de esa cantidad
+    Se juntan valores vecinos hasta que cada FE ≥ 5 (regla de Coss Bu) y se calcula
+      X₀² = Σ (FO − FE)² ÷ FE,  con k − 1 grados de libertad.
+    H₀: las llegadas simuladas siguen la distribución de campo. Nivel de significancia 1 % (99 % de confianza).
+    """
+    from scipy import stats
+
+    filas = []
+    factor = res.escenario.factor_demanda
+    for s_ in SEMAFOROS:
+        for p in PERIODOS:
+            sim = res.ciclos[(res.ciclos["semaforo"] == s_) & (res.ciclos["periodo"] == p)]["llegadas"]
+            if len(sim) < 10:
+                continue
+            obs = pd.Series(semaforos[s_].llegadas[p])
+            valores = sorted(obs.unique())
+            prob = obs.value_counts(normalize=True).reindex(valores).to_numpy()
+            if factor != 1:
+                valores = [round(v * factor) for v in valores]
+            fo = np.array([(sim == v).sum() for v in valores], dtype=float)
+            fe = prob * len(sim)
+            # agrupar vecinos hasta FE ≥ 5
+            grupos_fo, grupos_fe, acum_o, acum_e = [], [], 0.0, 0.0
+            for o, e in zip(fo, fe):
+                acum_o += o
+                acum_e += e
+                if acum_e >= 5:
+                    grupos_fo.append(acum_o); grupos_fe.append(acum_e); acum_o = acum_e = 0.0
+            if acum_e > 0 and grupos_fe:
+                grupos_fo[-1] += acum_o; grupos_fe[-1] += acum_e
+            k = len(grupos_fe)
+            if k < 2:
+                continue
+            x2 = float(sum((o - e) ** 2 / e for o, e in zip(grupos_fo, grupos_fe)))
+            critico = float(stats.chi2.ppf(1 - alfa, k - 1))
+            filas.append({"Semáforo": s_, "Periodo": p, "Ciclos simulados": len(sim), "Clases (FE ≥ 5)": k,
+                          "X₀²": x2, "Grados de libertad": k - 1, "Valor crítico (α = 0,01)": critico,
+                          "Decisión": "No se rechaza H₀" if x2 < critico else "Se rechaza H₀"})
+    return pd.DataFrame(filas)
+
+
 def flujo_por_franja(base: pd.DataFrame) -> pd.DataFrame:
     """Flujo observado en campo por franja horaria: vehículos por hora = pasan por ciclo × 3600 ÷ ciclo (s).
 
@@ -296,6 +371,9 @@ def construir(res: ResultadoPrediccion, semaforos: dict[str, DatosSemaforo], bas
     ).reset_index().rename(columns={"semaforo": "Semáforo", "periodo": "Periodo"})
     t["Flujo por franja medida"] = flujo_por_franja(base)
     t["Precisión"], conv = precision(res)
+    t["Mapa de calor (día × hora)"] = mapa_calor(res)
+    t["Colas"] = colas(res)
+    t["Prueba de ajuste de llegadas"] = prueba_ajuste_llegadas(res, semaforos)
     t["Números pseudoaleatorios"] = secuencia_numeros(res, semaforos)
     t["Datos de campo"] = base.rename(columns={
         "semaforo": "Semáforo", "ubicacion": "Ubicación", "jornada": "Jornada", "periodo": "Periodo",
@@ -324,10 +402,22 @@ def construir(res: ResultadoPrediccion, semaforos: dict[str, DatosSemaforo], bas
             + (f"Las repeticiones 2 a {e.repeticiones} siguen la misma secuencia a continuación "
                f"({2 * int(res.info_semaforos['ciclos'].sum())} números cada una)." if e.repeticiones > 1 else "")),
     }
-    graficos = {"bloques": b, "horas": hr, "bloques_ciclos": bc, "barrido": barrido, "convergencia": conv}
+    graficos = {"bloques": b, "horas": hr, "bloques_ciclos": bc, "barrido": barrido, "convergencia": conv,
+                "ciclos": res.ciclos[["semaforo", "periodo", "pasan", "quedan", "llegadas"]]}
     fila_tot = t["Precisión"].iloc[0]
     kpis["Error relativo IC 99 % (%)"] = fila_tot["Error relativo (%)"]
     kpis["Repeticiones para error ≤ 1 %"] = fila_tot["Repeticiones para error ≤ 1 %"]
+    notas["Mapa de calor"] = ("Vehículos que pasan en cada hora (columnas) de cada día (filas), sumando los 4 semáforos. "
+                              "Entre más oscuro, más tráfico. Horas fuera del periodo simulado quedan en blanco.")
+    notas["Cajas"] = ("Cada caja resume los vehículos que pasan por ciclo: la línea del medio es la mediana, la caja va "
+                      "del 25 % al 75 % de los ciclos y los bigotes muestran el rango normal; los puntos sueltos son "
+                      "ciclos atípicos.")
+    notas["Colas"] = ("Carros que quedan esperando al final de cada verde. El percentil 95 es la cola que no se supera "
+                      "en el 95 % de los ciclos.")
+    notas["Prueba de ajuste de llegadas"] = (
+        "Comprueba que las llegadas que generó el simulador siguen la distribución medida en campo. "
+        "FE = ciclos × probabilidad observada; se juntan valores hasta FE ≥ 5; X₀² = Σ(FO − FE)² ÷ FE con k − 1 "
+        "grados de libertad. H₀: las llegadas simuladas siguen la distribución de campo (α = 0,01).")
     notas["Precisión"] = ("Con un nivel de confianza del 99 % (Z = 2,576): semiancho h = Z · s ÷ √R; error relativo = "
                           "h ÷ promedio; repeticiones necesarias para un error de 1 %: R* = (Z · s ÷ (0,01 · promedio))². "
                           "s es la desviación estándar del resultado entre las R repeticiones.")
