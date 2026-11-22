@@ -16,7 +16,7 @@ from .datos import PERIODOS, SEMAFOROS, DatosSemaforo
 from .generador import A, M
 from .modelo import Escenario, barrido_demanda, simular, tabla_intervalos
 from .prediccion import FRANJA_MIN, ResultadoPrediccion, texto_horas_pico
-from .reportes import (reporte_bloques, reporte_bloques_ciclos, reporte_horas, reporte_semaforos,
+from .reportes import (NIVEL_CONFIANZA, Z, reporte_bloques, reporte_bloques_ciclos, reporte_horas, reporte_semaforos,
                        reporte_valle_pico)
 
 
@@ -43,11 +43,11 @@ def _por_semaforo_y_periodo(res: ResultadoPrediccion) -> pd.DataFrame:
                 continue
             rep = d.groupby("repeticion")[["pasan", "ciclos", "llegadas", "cola_suma"]].sum()
             m = rep.mean()
-            ic = 1.96 * rep["pasan"].std(ddof=1) / math.sqrt(r) if r > 1 else 0.0
+            ic = Z * rep["pasan"].std(ddof=1) / math.sqrt(r) if r > 1 else 0.0
             horas = d["hora"].nunique() * FRANJA_MIN / 60
             filas.append({
                 "Semáforo": s, "Periodo": p, "Horas": horas, "Ciclos": m["ciclos"],
-                "Vehículos que pasan": m["pasan"], "± IC 95 %": ic,
+                "Vehículos que pasan": m["pasan"], "± IC 99 %": ic,
                 "% del semáforo": 100 * m["pasan"] / total_s if total_s else 0,
                 "Prom. por ciclo": m["pasan"] / m["ciclos"], "Prom. por hora": m["pasan"] / horas,
                 "Llegadas": m["llegadas"], "Cola prom. (veh)": m["cola_suma"] / m["ciclos"],
@@ -115,6 +115,46 @@ def secuencia_numeros(res: ResultadoPrediccion, semaforos: dict[str, DatosSemafo
     return out.head(max_filas)
 
 
+ERROR_OBJETIVO = 0.01   # 1 % de error relativo
+
+
+def precision(res: ResultadoPrediccion) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """¿Qué tan exacta es la predicción con estas repeticiones?
+
+    Para cada resultado se calcula, entre las R repeticiones:
+      media x̄, desviación s, semiancho del IC 99 % h = Z·s/√R,
+      error relativo = h ÷ x̄, y repeticiones necesarias para error ≤ 1 %:
+      R* = (Z·s ÷ (0,01·x̄))²
+    Devuelve (tabla de precisión, convergencia del total por repetición).
+    """
+    h = res.horas
+    r = res.escenario.repeticiones
+    series = {"Total del cruce": h.groupby("repeticion")["pasan"].sum()}
+    for p in PERIODOS:
+        series[f"Total en hora {p.lower()}"] = h[h["periodo"] == p].groupby("repeticion")["pasan"].sum()
+    for s_ in SEMAFOROS:
+        series[f"Semáforo {s_}"] = h[h["semaforo"] == s_].groupby("repeticion")["pasan"].sum()
+    filas = []
+    for nombre, x in series.items():
+        if x.empty:
+            continue
+        m, sd = x.mean(), (x.std(ddof=1) if r > 1 else 0.0)
+        hw = Z * sd / math.sqrt(r) if r > 1 else float("nan")
+        err = hw / m if m and r > 1 else float("nan")
+        necesarias = math.ceil((Z * sd / (ERROR_OBJETIVO * m)) ** 2) if m and r > 1 else float("nan")
+        filas.append({"Resultado": nombre, "Promedio": m, "Desviación entre repeticiones": sd,
+                      "± IC 99 %": hw, "Error relativo (%)": 100 * err,
+                      "Repeticiones para error ≤ 1 %": max(2, necesarias) if necesarias == necesarias else necesarias,
+                      "¿Cumple ≤ 1 %?": ("Sí" if err <= ERROR_OBJETIVO else "No") if err == err else "Faltan repeticiones"})
+    tot = series["Total del cruce"].sort_index()
+    conv = pd.DataFrame({"Repeticiones": range(1, len(tot) + 1), "Total": tot.to_numpy()})
+    conv["Promedio acumulado"] = conv["Total"].expanding().mean()
+    sd_acum = conv["Total"].expanding().std(ddof=1)
+    conv["Límite inferior IC 99 %"] = conv["Promedio acumulado"] - Z * sd_acum / np.sqrt(conv["Repeticiones"])
+    conv["Límite superior IC 99 %"] = conv["Promedio acumulado"] + Z * sd_acum / np.sqrt(conv["Repeticiones"])
+    return pd.DataFrame(filas), conv
+
+
 def flujo_por_franja(base: pd.DataFrame) -> pd.DataFrame:
     """Flujo observado en campo por franja horaria: vehículos por hora = pasan por ciclo × 3600 ÷ ciclo (s).
 
@@ -174,13 +214,13 @@ def construir(res: ResultadoPrediccion, semaforos: dict[str, DatosSemaforo], bas
     sem = reporte_semaforos(res)
     total = sem["pasan"].sum()
     por_rep = res.horas.groupby("repeticion")["pasan"].sum()
-    ic_total = 1.96 * por_rep.std(ddof=1) / math.sqrt(e.repeticiones) if e.repeticiones > 1 else 0.0
+    ic_total = Z * por_rep.std(ddof=1) / math.sqrt(e.repeticiones) if e.repeticiones > 1 else 0.0
     horas_sim = (e.fin - e.inicio).total_seconds() / 3600
     ciclos_tot = int(res.info_semaforos["ciclos"].sum())
     vp = reporte_valle_pico(res)
 
     kpis = {
-        "Vehículos que pasan": total, "Margen ± IC 95 %": ic_total, "Horas simuladas": horas_sim,
+        "Vehículos que pasan": total, "Margen ± IC 99 %": ic_total, "Horas simuladas": horas_sim,
         "Promedio por hora": total / horas_sim if horas_sim else 0, "Ciclos": ciclos_tot,
         "Números pseudoaleatorios": res.numeros_usados, "Repeticiones": e.repeticiones,
     }
@@ -201,6 +241,8 @@ def construir(res: ResultadoPrediccion, semaforos: dict[str, DatosSemaforo], bas
         ("Demanda (× la observada)", e.factor_demanda),
         ("Horas pico (fijas, del Excel de campo)", texto_horas_pico()),
         ("Horas valle", "todas las demás"),
+        ("Nivel de confianza", "99 % (Z = 2,576)"),
+        ("Error relativo objetivo", "≤ 1 %"),
         ("Bloques de horas del reporte", f"{horas_bloque} h"),
         ("Bloques de ciclos del reporte", f"{ciclos_bloque} ciclos"),
         ("Generado el", datetime.now().strftime("%d/%m/%Y %H:%M")),
@@ -209,7 +251,7 @@ def construir(res: ResultadoPrediccion, semaforos: dict[str, DatosSemaforo], bas
     t["Semáforos"] = pd.DataFrame([{
         "Semáforo": r["semaforo"], "Ubicación": r["ubicacion"], "Verde (s)": r["verde_s"],
         "Rojo (s)": r["rojo_s"], "Ciclo (s)": r["ciclo_s"], "Capacidad por verde": r["capacidad_ciclo"],
-        "Ciclos": r["ciclos"], "Vehículos que pasan": r["pasan"], "± IC 95 %": r["ic95"],
+        "Ciclos": r["ciclos"], "Vehículos que pasan": r["pasan"], "± IC 99 %": r["ic"],
         "% del total": r["pct_del_total"], "Prom. por ciclo": r["prom_por_ciclo"],
         "Cola prom. (veh)": r["cola_prom"]} for _, r in sem.iterrows()])
 
@@ -222,19 +264,19 @@ def construir(res: ResultadoPrediccion, semaforos: dict[str, DatosSemaforo], bas
 
     b = reporte_bloques(res, horas_bloque)
     t[f"Bloques de {horas_bloque} h"] = b.drop(columns=["bloque_ini"]).rename(columns={
-        "bloque": "Bloque", "total": "Total que pasan", "ic95": "± IC 95 %", "pct_del_total": "% del total",
+        "bloque": "Bloque", "total": "Total que pasan", "ic": "± IC 99 %", "pct_del_total": "% del total",
         "ciclos": "Ciclos", "prom_por_ciclo": "Prom. por ciclo", "en_valle": "En hora valle",
         "pct_valle": "% valle", "en_pico": "En hora pico", "pct_pico": "% pico"})
 
     hr = reporte_horas(res)
     t["Por hora"] = hr.rename(columns={
-        "hora": "Hora", "periodo": "Periodo", "total": "Total que pasan", "ic95": "± IC 95 %",
+        "hora": "Hora", "periodo": "Periodo", "total": "Total que pasan", "ic": "± IC 99 %",
         "ciclos": "Ciclos", "cola_prom": "Cola prom. (veh)", "pct_del_total": "% del total"})
 
     bc = reporte_bloques_ciclos(res, ciclos_bloque)
     t[f"Bloques de {ciclos_bloque} ciclos"] = bc.rename(columns={
         "semaforo": "Semáforo", "ciclos": "Ciclos", "desde": "Desde", "hasta": "Hasta", "periodo": "Periodo",
-        "pasan": "Vehículos que pasan", "ic95": "± IC 95 %", "pct_del_semaforo": "% del semáforo",
+        "pasan": "Vehículos que pasan", "ic": "± IC 99 %", "pct_del_semaforo": "% del semáforo",
         "prom_por_ciclo": "Prom. por ciclo", "llegadas": "Llegadas", "cola_prom": "Cola prom. (veh)"})
 
     cap, barrido = _capacidad(semaforos, e.semilla, e.factor_demanda)
@@ -253,6 +295,7 @@ def construir(res: ResultadoPrediccion, semaforos: dict[str, DatosSemaforo], bas
                                      "Llegadas prom.": ("llegadas", "mean")}
     ).reset_index().rename(columns={"semaforo": "Semáforo", "periodo": "Periodo"})
     t["Flujo por franja medida"] = flujo_por_franja(base)
+    t["Precisión"], conv = precision(res)
     t["Números pseudoaleatorios"] = secuencia_numeros(res, semaforos)
     t["Datos de campo"] = base.rename(columns={
         "semaforo": "Semáforo", "ubicacion": "Ubicación", "jornada": "Jornada", "periodo": "Periodo",
@@ -281,6 +324,12 @@ def construir(res: ResultadoPrediccion, semaforos: dict[str, DatosSemaforo], bas
             + (f"Las repeticiones 2 a {e.repeticiones} siguen la misma secuencia a continuación "
                f"({2 * int(res.info_semaforos['ciclos'].sum())} números cada una)." if e.repeticiones > 1 else "")),
     }
-    graficos = {"bloques": b, "horas": hr, "bloques_ciclos": bc, "barrido": barrido}
+    graficos = {"bloques": b, "horas": hr, "bloques_ciclos": bc, "barrido": barrido, "convergencia": conv}
+    fila_tot = t["Precisión"].iloc[0]
+    kpis["Error relativo IC 99 % (%)"] = fila_tot["Error relativo (%)"]
+    kpis["Repeticiones para error ≤ 1 %"] = fila_tot["Repeticiones para error ≤ 1 %"]
+    notas["Precisión"] = ("Con un nivel de confianza del 99 % (Z = 2,576): semiancho h = Z · s ÷ √R; error relativo = "
+                          "h ÷ promedio; repeticiones necesarias para un error de 1 %: R* = (Z · s ÷ (0,01 · promedio))². "
+                          "s es la desviación estándar del resultado entre las R repeticiones.")
     titulo = (f"Predicción del {e.inicio:%d/%m/%Y %H:%M} al {e.fin:%d/%m/%Y %H:%M}")
     return Paquete(titulo, kpis, t, notas, graficos, e.inicio, e.fin)

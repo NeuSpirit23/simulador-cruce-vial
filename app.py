@@ -5,6 +5,7 @@ Ejecutar:  streamlit run app.py
 
 from datetime import date, datetime, time, timedelta
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -274,7 +275,7 @@ tabs = st.tabs(["📊 Resumen", "📑 Reportes", "🚗 Simulación en vivo", "�
 # ---------------------------------------------------------------------------
 with tabs[0]:
     st.markdown(kpis([
-        ("Vehículos que pasan", mil(K["Vehículos que pasan"]), f"± {mil(K['Margen ± IC 95 %'])} (IC 95 %)", "#0f2a44"),
+        ("Vehículos que pasan", mil(K["Vehículos que pasan"]), f"± {mil(K['Margen ± IC 99 %'])} (IC 99 %)", "#0f2a44"),
         ("Promedio por hora", mil(K["Promedio por hora"]), f"en {mil(K['Horas simuladas'], 1)} h simuladas", "#1f6f8b"),
         ("Ciclos simulados", mil(K["Ciclos"]), "verde → rojo, 4 semáforos", VERDE),
         ("Números pseudoaleatorios", mil(K["Números pseudoaleatorios"]), f"{repeticiones} repeticiones · semilla {semilla}", "#7c3aed"),
@@ -290,6 +291,47 @@ with tabs[0]:
         st.markdown(nota(f"📈 En <b>hora pico</b> pasan en promedio <b>{mil(p)} vehículos por hora</b>, frente a "
                          f"<b>{mil(v)}</b> en hora valle: un <b>{mil(100 * (p / v - 1), 1)} % más</b>."), unsafe_allow_html=True)
     descargas("resumen")
+    prec = T["Precisión"]
+    rep_necesarias = int(np.nanmax(prec["Repeticiones para error ≤ 1 %"])) if prec["Repeticiones para error ≤ 1 %"].notna().any() else 2
+    err_tot = K.get("Error relativo IC 99 % (%)", float("nan"))
+    cumple = bool((prec["¿Cumple ≤ 1 %?"] == "Sí").all())
+    st.markdown(seccion("🎯", "Precisión de la predicción (confianza 99 %, error objetivo ≤ 1 %)", pq.notas["Precisión"]),
+                unsafe_allow_html=True)
+    st.markdown(kpis([
+        ("Nivel de confianza", "99 %", "Z = 2,576", "#0f2a44"),
+        ("Error relativo del total", (mil(err_tot, 2) + " %") if err_tot == err_tot else "—",
+         "objetivo ≤ 1 %", VERDE if err_tot == err_tot and err_tot <= 1 else PICO),
+        ("Resultados que cumplen ≤ 1 %", f"{int((prec['¿Cumple ≤ 1 %?'] == 'Sí').sum())} de {len(prec)}",
+         "total, valle, pico y cada semáforo", VERDE if cumple else PICO),
+        ("Repeticiones para que todo cumpla", mil(min(rep_necesarias, 200)), f"hoy: {repeticiones}", "#7c3aed"),
+    ]), unsafe_allow_html=True)
+    if not cumple:
+        def _ajustar():
+            st.session_state.repeticiones = int(min(max(rep_necesarias, st.session_state.repeticiones), 200))
+            _desde_periodo()
+        st.button(f"🎯 Ajustar a {min(rep_necesarias, 200)} repeticiones para que todo quede con error ≤ 1 %",
+                  on_click=_ajustar, type="primary")
+        if rep_necesarias > 200:
+            st.caption("Se necesitan más de 200 repeticiones; se ajusta al máximo (200). Un periodo más largo también "
+                       "reduce el error relativo.")
+    c1, c2 = st.columns([1.2, 1])
+    with c1:
+        tabla(prec)
+    with c2, st.container(border=True):
+        cv = G["convergencia"]
+        figc = go.Figure()
+        figc.add_scatter(x=cv["Repeticiones"], y=cv["Límite superior IC 99 %"], line=dict(width=0), showlegend=False,
+                         hoverinfo="skip")
+        figc.add_scatter(x=cv["Repeticiones"], y=cv["Límite inferior IC 99 %"], fill="tonexty", line=dict(width=0),
+                         fillcolor="rgba(31,111,139,.18)", name="IC 99 %")
+        figc.add_scatter(x=cv["Repeticiones"], y=cv["Promedio acumulado"], mode="lines+markers", name="Promedio acumulado",
+                         line=dict(color="#0f2a44"))
+        figc.add_scatter(x=cv["Repeticiones"], y=cv["Total"], mode="markers", name="Cada repetición",
+                         marker=dict(color="#9aa5b1", size=6))
+        figc.update_layout(title="Convergencia del total al aumentar las repeticiones", height=330,
+                           xaxis_title="Repeticiones", yaxis_title="Vehículos")
+        st.plotly_chart(figc, use_container_width=True)
+
     c1, c2 = st.columns(2)
     with c1, st.container(border=True):
         grafico_valle_pico()
@@ -529,7 +571,7 @@ los de hora valle. **Todo se recalcula solo** al cambiar cualquier dato de la ba
 5. **Quedan.** `quedan = en espera − pasan`, que pasan a la cola del siguiente ciclo.
 
 **Repeticiones.** Todo se repite R veces con números pseudoaleatorios distintos. El resultado es el promedio
-y su margen es el intervalo de confianza del 95 %: `promedio ± 1,96 · desviación estándar ÷ √R`.
+y su margen es el intervalo de confianza del 99 %: `promedio ± 2,576 · desviación estándar ÷ √R`.
 
 **Supuestos.** Total por semáforo (sin separar giros), rojo de 99 s, sin amarillo ni despeje. Las horas que
 no se midieron (noche, madrugada, fines de semana) se tratan como hora valle, así que en esas horas la

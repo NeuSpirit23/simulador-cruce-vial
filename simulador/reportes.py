@@ -1,9 +1,9 @@
 """Reportes de la predicción: por bloques de horas, por hora, por ciclo y valle vs pico.
 
 Todos los valores son el PROMEDIO de las repeticiones. Cuando hay más de una
-repetición se agrega el intervalo de confianza del 95 %:
+repetición se agrega el intervalo de confianza del 99 %:
 
-    IC 95 % = promedio ± 1,96 · (desviación estándar / √R)
+    IC 99 % = promedio ± 2,576 · (desviación estándar / √R)
 """
 
 import math
@@ -13,6 +13,9 @@ import pandas as pd
 from .datos import SEMAFOROS
 from .prediccion import FRANJA_MIN, ResultadoPrediccion
 
+NIVEL_CONFIANZA = 0.99
+Z = 2.576            # valor de la normal estándar para 99 % de confianza (dos colas)
+
 
 def _promedio_repeticiones(horas: pd.DataFrame, claves: list[str]) -> pd.DataFrame:
     """Suma por repetición y luego promedia entre repeticiones."""
@@ -21,7 +24,7 @@ def _promedio_repeticiones(horas: pd.DataFrame, claves: list[str]) -> pd.DataFra
     res = g[["ciclos", "pasan", "llegadas", "cola_suma"]].mean().reset_index()
     sd = g["pasan"].std(ddof=1).fillna(0).reset_index(drop=True)
     r = horas["repeticion"].nunique()
-    res["ic95"] = 1.96 * sd / math.sqrt(r) if r > 1 else 0.0
+    res["ic"] = Z * sd / math.sqrt(r) if r > 1 else 0.0
     return res
 
 
@@ -38,7 +41,7 @@ def reporte_bloques(res: ResultadoPrediccion, horas_bloque: int = 2) -> pd.DataF
     r = h["repeticion"].nunique()
     base = g["pasan"].mean().rename("total").to_frame()
     base["ciclos"] = g["ciclos"].mean()
-    base["ic95"] = (1.96 * g["pasan"].std(ddof=1).fillna(0) / math.sqrt(r)) if r > 1 else 0.0
+    base["ic"] = (Z * g["pasan"].std(ddof=1).fillna(0) / math.sqrt(r)) if r > 1 else 0.0
 
     # Por semáforo
     sem = h.groupby(["repeticion", "bloque_ini", "semaforo"], as_index=False)["pasan"].sum()
@@ -60,7 +63,7 @@ def reporte_bloques(res: ResultadoPrediccion, horas_bloque: int = 2) -> pd.DataF
     out["bloque"] = (out["bloque_ini"].dt.strftime("%d/%m/%Y %H:%M") + " – "
                      + out["bloque_fin"].dt.strftime("%H:%M"))
     return out[["bloque", "bloque_ini"] + SEMAFOROS +
-               ["total", "ic95", "pct_del_total", "ciclos", "prom_por_ciclo",
+               ["total", "ic", "pct_del_total", "ciclos", "prom_por_ciclo",
                 "en_valle", "pct_valle", "en_pico", "pct_pico"]]
 
 
@@ -81,7 +84,7 @@ def reporte_horas(res: ResultadoPrediccion) -> pd.DataFrame:
     tabla["total"] = tabla[SEMAFOROS].sum(axis=1)
     tot = _promedio_repeticiones(hh, ["hora"]).set_index("hora")
     tabla = tabla.reset_index().set_index("hora")
-    tabla["ic95"] = tot["ic95"]
+    tabla["ic"] = tot["ic"]
     tabla["ciclos"] = tot["ciclos"]
     tabla["cola_prom"] = tot["cola_suma"] / tot["ciclos"]
     tabla = tabla.reset_index()
@@ -113,7 +116,7 @@ def reporte_valle_pico(res: ResultadoPrediccion) -> pd.DataFrame:
 def reporte_semaforos(res: ResultadoPrediccion) -> pd.DataFrame:
     p = _promedio_repeticiones(res.horas, ["semaforo"]).set_index("semaforo")
     info = res.info_semaforos.set_index("semaforo")
-    out = info.join(p[["pasan", "ic95", "llegadas", "cola_suma"]])
+    out = info.join(p[["pasan", "ic", "llegadas", "cola_suma"]])
     out["prom_por_ciclo"] = out["pasan"] / out["ciclos"]
     out["cola_prom"] = out["cola_suma"] / out["ciclos"]
     out["pct_del_total"] = 100 * out["pasan"] / out["pasan"].sum()
@@ -135,11 +138,11 @@ def reporte_bloques_ciclos(res: ResultadoPrediccion, ciclos_bloque: int = 10) ->
                 llegadas=("llegadas_prom", "sum"), cola_prom=("quedan_prom", "mean"),
                 ciclos_pico=("periodo", lambda x: int((x == "Pico").sum()))).reset_index()
     out["ciclos"] = out["ciclo_hasta"] - out["ciclo_desde"] + 1
-    out["ic95"] = 1.96 * (out["var"] ** 0.5) / math.sqrt(r) if r > 1 else 0.0
+    out["ic"] = Z * (out["var"] ** 0.5) / math.sqrt(r) if r > 1 else 0.0
     out["prom_por_ciclo"] = out["pasan"] / out["ciclos"]
     out["pct_del_semaforo"] = 100 * out["pasan"] / out.groupby("semaforo")["pasan"].transform("sum")
     out["ciclos"] = out["ciclo_desde"].astype(str) + "–" + out["ciclo_hasta"].astype(str)
     out["periodo"] = out.apply(lambda x: "Pico" if x["ciclos_pico"] == x["ciclo_hasta"] - x["ciclo_desde"] + 1
                                else ("Valle" if x["ciclos_pico"] == 0 else "Valle y pico"), axis=1)
-    return out[["semaforo", "ciclos", "desde", "hasta", "periodo", "pasan", "ic95", "pct_del_semaforo",
+    return out[["semaforo", "ciclos", "desde", "hasta", "periodo", "pasan", "ic", "pct_del_semaforo",
                 "prom_por_ciclo", "llegadas", "cola_prom"]]

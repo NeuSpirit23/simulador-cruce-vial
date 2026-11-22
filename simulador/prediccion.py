@@ -10,7 +10,7 @@ Los resultados se agrupan en franjas de 30 minutos.
 
 La simulación se repite R veces (repeticiones). Cada repetición usa números
 pseudoaleatorios distintos del mismo generador, así que el resultado final es
-el promedio de las R repeticiones, con su intervalo de confianza del 95 %.
+el promedio de las R repeticiones, con su intervalo de confianza del 99 %.
 """
 
 from dataclasses import dataclass, field

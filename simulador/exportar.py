@@ -45,7 +45,7 @@ def _decimales(col: str) -> int:
         return 5
     if "veh/h" in c:
         return 0
-    if any(k in c for k in ("%", "ic 95", "prom", "cola", "error", "×", "observad", "simulad", "llegadas (")):
+    if any(k in c for k in ("%", "ic 99", "prom", "cola", "error", "×", "observad", "simulad", "llegadas (")):
         return 1
     return 0
 
@@ -181,7 +181,10 @@ def excel_paquete(p: Paquete) -> bytes:
     f += 2
     _, f = _tabla_excel(ws, t["Semáforos"], f, titulo="Resultados por semáforo")
     f += 2
-    _tabla_excel(ws, t["Valle vs pico"], f, titulo="Hora valle frente a hora pico")
+    _, f = _tabla_excel(ws, t["Valle vs pico"], f, titulo="Hora valle frente a hora pico")
+    f += 2
+    _, f = _tabla_excel(ws, t["Precisión"], f, titulo="Precisión (confianza 99 %, error objetivo ≤ 1 %)")
+    ws.cell(f + 1, 1, p.notas["Precisión"]).font = Font(italic=True, size=9, color="595959")
     _anchos(ws, maximo=40)
     ws.column_dimensions["A"].width = 30
 
@@ -372,12 +375,12 @@ def _estilo_ax(ax):
 
 
 def _kpis_pdf(p: Paquete, ancho):
-    claves = ["Vehículos que pasan", "Margen ± IC 95 %", "Promedio por hora", "Horas simuladas",
+    claves = ["Vehículos que pasan", "Margen ± IC 99 %", "Promedio por hora", "Error relativo IC 99 % (%)",
               "Pasan en hora valle", "Pasan en hora pico", "Ciclos", "Números pseudoaleatorios"]
     celdas = []
     for k in claves:
         v = p.kpis.get(k, 0)
-        d = 1 if k == "Horas simuladas" else 0
+        d = 2 if "Error" in k else (1 if k == "Horas simuladas" else 0)
         valor = ("± " if k.startswith("Margen") else "") + _mil(v, d)
         celdas.append(Paragraph(f"<font size=7.5 color='#595959'>{k}</font><br/>"
                                 f"<font size=14 color='#{AZUL}'><b>{valor}</b></font>", _KPI))
@@ -439,6 +442,9 @@ def pdf_paquete(p: Paquete) -> bytes:
 
     h.append(PageBreak())
     h.append(KeepTogether([Paragraph("Resultados por semáforo", _H1), _tabla_pdf(t["Semáforos"], W)]))
+    h.append(Spacer(1, 0.3 * cm))
+    h.append(KeepTogether([Paragraph("Precisión de la predicción (confianza 99 %, error objetivo ≤ 1 %)", _H1),
+                           Paragraph(p.notas["Precisión"], _NOTA), _tabla_pdf(t["Precisión"], W)]))
     h.append(Spacer(1, 0.3 * cm))
     h.append(KeepTogether([Paragraph("Hora valle frente a hora pico (todo el periodo)", _H1),
                            Paragraph(p.notas["Valle vs pico"], _NOTA), _tabla_pdf(t["Valle vs pico"], W)]))
