@@ -313,12 +313,41 @@ try {
       out.push([c[0] + al[0]*i*d/2 + pe[0]*j*w/2, c[1] + al[1]*i*d/2 + pe[1]*j*w/2]));
     return out;
   }
-  const fueraDeVias = (c, w, d, ang) => esquinas(c, w, d, ang).every(q => D.vias.every(v => {
-    for (let i = 1; i < v.pts.length; i++) if (distSeg(q, v.pts[i-1], v.pts[i]) < v.ancho/2 + MARGEN_ANDEN) return false;
-    return true; }));
+  // distancia real entre el rectángulo del edificio y cada tramo de vía (no solo sus esquinas):
+  // 0 si el tramo lo corta o queda adentro; si no, la menor distancia entre bordes
+  const cruz = (o, a, b) => (a[0]-o[0])*(b[1]-o[1]) - (a[1]-o[1])*(b[0]-o[0]);
+  function seCortan(p1, p2, q1, q2){
+    const d1 = cruz(q1, q2, p1), d2 = cruz(q1, q2, p2), d3 = cruz(p1, p2, q1), d4 = cruz(p1, p2, q2);
+    return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
+  }
+  function dentroRect(p, r){                       // r = 4 esquinas en orden
+    let s0 = 0; for (let i = 0; i < 4; i++){ const c = cruz(r[i], r[(i+1)%4], p); if (c === 0) continue;
+      if (s0 === 0) s0 = Math.sign(c); else if (Math.sign(c) !== s0) return false; } return true;
+  }
+  function rect(c, w, d, ang){
+    const al = [Math.sin(ang), Math.cos(ang)], pe = [Math.cos(ang), -Math.sin(ang)];
+    return [[1,1],[1,-1],[-1,-1],[-1,1]].map(([i, j]) => [c[0] + al[0]*i*d/2 + pe[0]*j*w/2, c[1] + al[1]*i*d/2 + pe[1]*j*w/2]);
+  }
+  function distRectSeg(r, a, b){
+    if (dentroRect(a, r) || dentroRect(b, r)) return 0;
+    let m = 1e9;
+    for (let i = 0; i < 4; i++){ const e1 = r[i], e2 = r[(i+1)%4];
+      if (seCortan(a, b, e1, e2)) return 0;
+      m = Math.min(m, distSeg(e1, a, b), distSeg(a, e1, e2), distSeg(b, e1, e2)); }
+    return m;
+  }
+  function holguraVias(c, w, d, ang){              // espacio libre (m) que queda detrás del andén
+    const r = rect(c, w, d, ang); let m = 1e9;
+    D.vias.forEach(v => { for (let i = 1; i < v.pts.length; i++)
+      m = Math.min(m, distRectSeg(r, v.pts[i-1], v.pts[i]) - v.ancho/2 - MARGEN_ANDEN); });
+    return m;
+  }
+  const fueraDeVias = (c, w, d, ang) => holguraVias(c, w, d, ang) >= 0;
   const ocupados = [];                             // círculos de lo ya construido
   const libreDeOtros = (c, radio) => ocupados.every(o => Math.hypot(c[0]-o[0], c[1]-o[1]) > o[2] + radio + 1.2);
+  window._edificios = [];
   function edificio(c, w, d, h, ang, color){
+    window._edificios.push({c, w, d, ang, holgura: holguraVias(c, w, d, ang)});
     const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color));
     b.position.copy(P(c[0], c[1])); b.position.y = h/2; b.rotation.y = -ang; b.castShadow = b.receiveShadow = true; escena.add(b);
     ocupados.push([c[0], c[1], Math.hypot(w, d)/2]); return b;
@@ -332,7 +361,14 @@ try {
     const ab = sub(vc.b, vc.a), t = Math.max(0, Math.min(1, ((c[0]-vc.a[0])*ab[0] + (c[1]-vc.a[1])*ab[1]) / ((ab[0]**2 + ab[1]**2) || 1)));
     const pie = [vc.a[0] + ab[0]*t, vc.a[1] + ab[1]*t];
     let nrm = sub(c, pie); const nl = lon(nrm) || 1; nrm = [nrm[0]/nl, nrm[1]/nl];
-    for (let k = 0; k < 80 && !(fueraDeVias(c, w, d, ang) && libreDeOtros(c, Math.hypot(w, d)/2)); k++) c = [c[0] + nrm[0]*0.5, c[1] + nrm[1]*0.5];
+    const valido = q => fueraDeVias(q, w, d, ang) && libreDeOtros(q, Math.hypot(w, d)/2);
+    let ok = null;
+    for (let k = 0; k <= 60 && !ok; k++){ const q = [c[0] + nrm[0]*k*0.5, c[1] + nrm[1]*k*0.5]; if (valido(q)) ok = q; }
+    // si hacia adentro no cabe (manzana angosta entre dos vías), busca el lugar libre más cercano alrededor
+    for (let rr = 2; rr <= 40 && !ok; rr += 2) for (let a = 0; a < 24 && !ok; a++){
+      const q = [r.p[0] + rr*Math.cos(a*Math.PI/12), r.p[1] + rr*Math.sin(a*Math.PI/12)]; if (valido(q)) ok = q; }
+    if (!ok){ letrero(r.nombre, r.p, 6, 13, r.color); return; }
+    c = ok;
     edificio(c, w, d, h, ang, 0xece6db);
     const techo = new THREE.Mesh(new THREE.BoxGeometry(w + 0.4, 0.6, d + 0.4), mat(new THREE.Color(r.color).getHex()));
     techo.position.copy(P(c[0], c[1])); techo.position.y = h + 0.3; techo.rotation.y = -ang; escena.add(techo);
