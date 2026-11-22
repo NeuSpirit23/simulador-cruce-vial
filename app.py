@@ -424,6 +424,10 @@ with tabs[5]:
     c2.download_button("⬇ Datos de campo en PDF", campo_pdf(), "datos_campo_cruce_vial.pdf",
                        mime="application/pdf", use_container_width=True)
     tabla(T["Datos de campo (resumen)"])
+    st.markdown("#### ¿En qué franjas hay más flujo? (datos de campo)")
+    st.caption("Vehículos por hora = carros que pasan por ciclo × 3600 ÷ duración del ciclo (s). "
+               "'Cruce completo' suma los 4 semáforos y solo aparece si se midieron los 4 en esa franja.")
+    tabla(T["Flujo por franja medida"])
     st.markdown("#### Tablas de codificación por intervalos de las llegadas (valle y pico)")
     st.caption("Si U cae en [desde, hasta), llegan 'valor' vehículos en ese ciclo.")
     for s_t in SEMAFOROS:

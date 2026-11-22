@@ -53,6 +53,26 @@ def _por_semaforo_y_periodo(res: ResultadoPrediccion) -> pd.DataFrame:
     return pd.DataFrame(filas)
 
 
+def flujo_por_franja(base: pd.DataFrame) -> pd.DataFrame:
+    """Flujo observado en campo por franja horaria: vehículos por hora = pasan por ciclo × 3600 ÷ ciclo (s).
+
+    Sirve para ver con los propios datos en qué franjas hay más movimiento.
+    """
+    b = base.copy()
+    b["veh_h"] = b["pasan"] * 3600 / (b["verde"] + b["rojo"])
+    g = b.groupby(["bloque", "semaforo"]).agg(veh_h=("veh_h", "mean"), ciclos=("pasan", "size"),
+                                              periodo=("periodo", "first")).reset_index()
+    t = g.pivot(index="bloque", columns="semaforo", values="veh_h").reindex(columns=SEMAFOROS)
+    t.columns = [f"{s} (veh/h)" for s in t.columns]
+    t["Ciclos medidos"] = g.groupby("bloque")["ciclos"].sum()
+    t["Cruce completo (veh/h)"] = t[[f"{s} (veh/h)" for s in SEMAFOROS]].sum(axis=1, min_count=4)
+    per = g.groupby("bloque")["periodo"].agg(lambda x: x.iloc[0] if x.nunique() == 1 else "Pico (S3 valle)")
+    t.insert(0, "Periodo en el Excel", per)
+    t = t.reset_index().rename(columns={"bloque": "Franja medida"})
+    t["Puesto (más flujo = 1)"] = t["Cruce completo (veh/h)"].rank(ascending=False, method="min")
+    return t
+
+
 def _capacidad(semaforos, semilla, factor):
     filas, barridos = [], []
     for p in PERIODOS:
@@ -170,6 +190,7 @@ def construir(res: ResultadoPrediccion, semaforos: dict[str, DatosSemaforo], bas
                                      "Pasan máx.": ("pasan", "max"), "Quedan prom.": ("quedan", "mean"),
                                      "Llegadas prom.": ("llegadas", "mean")}
     ).reset_index().rename(columns={"semaforo": "Semáforo", "periodo": "Periodo"})
+    t["Flujo por franja medida"] = flujo_por_franja(base)
     t["Datos de campo"] = base.rename(columns={
         "semaforo": "Semáforo", "ubicacion": "Ubicación", "jornada": "Jornada", "periodo": "Periodo",
         "bloque": "Bloque horario", "iteracion": "Iteración", "pasan": "Pasan", "quedan": "Quedan",

@@ -282,6 +282,8 @@ def excel_paquete(p: Paquete) -> bytes:
     ws.sheet_view.showGridLines = False
     f = _titulo(ws, "Datos de campo (toma manual por ciclo)", 1, f"{len(t['Datos de campo'])} ciclos observados")
     _, fin = _tabla_excel(ws, t["Datos de campo (resumen)"], f, titulo="Resumen por semáforo y periodo")
+    _, fin = _tabla_excel(ws, t["Flujo por franja medida"], fin + 3,
+                          titulo="Flujo por franja medida (veh/h = pasan por ciclo × 3600 ÷ ciclo)")
     _tabla_excel(ws, t["Datos de campo"], fin + 3, titulo="Registros", filtro=True)
     _anchos(ws)
 
@@ -519,6 +521,10 @@ def pdf_paquete(p: Paquete) -> bytes:
     h.append(Paragraph("Datos de campo (resumen)", _H1))
     h.append(Paragraph(f"{len(t['Datos de campo'])} ciclos observados por registro manual, de verde a rojo.", _NOTA))
     h.append(_tabla_pdf(t["Datos de campo (resumen)"], W * 0.75))
+    h.append(KeepTogether([Paragraph("¿En qué franjas hay más flujo? (datos de campo)", _H1),
+                           Paragraph("Vehículos por hora = pasan por ciclo × 3600 ÷ duración del ciclo. 'Cruce completo' "
+                                     "suma los 4 semáforos cuando se midieron los 4 en esa franja.", _NOTA),
+                           _tabla_pdf(t["Flujo por franja medida"], W)]))
 
     doc.build(h, onFirstPage=_pie, onLaterPages=_pie)
     return buf.getvalue()
