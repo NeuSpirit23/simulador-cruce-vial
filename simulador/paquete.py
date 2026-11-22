@@ -230,6 +230,71 @@ def prueba_ajuste_llegadas(res: ResultadoPrediccion, semaforos: dict[str, DatosS
     return pd.DataFrame(filas)
 
 
+def conclusiones(res: ResultadoPrediccion, tablas: dict) -> tuple[pd.DataFrame, list[str]]:
+    """Conclusiones automáticas para tomar decisiones (horas de más y menos flujo, dónde se espera más, margen).
+
+    Se calculan por hora del día, promediando todos los días del periodo y las repeticiones.
+    """
+    h = res.horas.copy()
+    r = res.escenario.repeticiones
+    h["h"] = h["hora"].dt.hour
+    h["dia"] = h["hora"].dt.normalize()
+    # vehículos por hora del día (promedio entre días y repeticiones)
+    por_hora = (h.groupby(["repeticion", "dia", "h"])["pasan"].sum().groupby("h").mean())
+    cola_hora = (h.groupby("h")["cola_suma"].sum() / h.groupby("h")["ciclos"].sum())
+    periodo_hora = h.groupby("h")["periodo"].agg(lambda x: x.iloc[0] if x.nunique() == 1 else "Valle y pico")
+    medidas = set(range(10, 13)) | set(range(16, 19))          # horas con datos de campo
+    hh = pd.DataFrame({"veh": por_hora, "cola": cola_hora, "periodo": periodo_hora})
+    rot = lambda x: f"{int(x):02d}:00–{int(x) + 1:02d}:00"
+    filas, frases = [], []
+    top = hh.sort_values("veh", ascending=False).head(3)
+    filas.append({"Indicador": "Horas de MAYOR flujo", "Resultado": ", ".join(rot(i) for i in top.index),
+                  "Detalle": " · ".join(f"{rot(i)}: {v:,.0f} veh/h".replace(",", ".") for i, v in top["veh"].items())})
+    bajo = hh[hh.index.isin(medidas)].sort_values("veh").head(3)
+    if len(bajo):
+        filas.append({"Indicador": "Horas de MENOR flujo (entre las medidas)", "Resultado": ", ".join(rot(i) for i in bajo.index),
+                      "Detalle": " · ".join(f"{rot(i)}: {v:,.0f} veh/h".replace(",", ".") for i, v in bajo["veh"].items())
+                      + ". Las horas no medidas se suponen como valle."})
+    cola_top = hh[hh.index.isin(medidas)].sort_values("cola", ascending=False).head(3)
+    filas.append({"Indicador": "Horas con MÁS carros esperando (entre las medidas)", "Resultado": ", ".join(rot(i) for i in cola_top.index),
+                  "Detalle": " · ".join(f"{rot(i)}: {v:.1f} carros en cola por ciclo".replace(".", ",") for i, v in cola_top["cola"].items())})
+    sem = tablas["Semáforos"].set_index("Semáforo")
+    colas_t = tablas["Colas"]
+    ct = colas_t[colas_t["Periodo"] == "Todo"].set_index("Semáforo")
+    s_mas = ct["% de ciclos con cola"].idxmax(); s_menos = ct["% de ciclos con cola"].idxmin()
+    filas.append({"Indicador": "Entrada con MÁS espera", "Resultado": f"{s_mas} · {sem.loc[s_mas, 'Ubicación']}",
+                  "Detalle": f"queda cola en el {ct.loc[s_mas, '% de ciclos con cola']:.0f} % de los ciclos; máximo "
+                             f"{int(ct.loc[s_mas, 'Máxima (veh)'])} carros".replace(".", ",")})
+    filas.append({"Indicador": "Entrada con MENOS espera", "Resultado": f"{s_menos} · {sem.loc[s_menos, 'Ubicación']}",
+                  "Detalle": f"queda cola solo en el {ct.loc[s_menos, '% de ciclos con cola']:.0f} % de los ciclos".replace(".", ",")})
+    s_flujo = sem["Vehículos que pasan"].idxmax()
+    filas.append({"Indicador": "Semáforo que mueve más carros", "Resultado": f"{s_flujo} · {sem.loc[s_flujo, 'Ubicación']}",
+                  "Detalle": f"{sem.loc[s_flujo, '% del total']:.1f} % del total, {sem.loc[s_flujo, 'Prom. por ciclo']:.1f} carros por ciclo".replace(".", ",")})
+    cap = tablas["Capacidad"]
+    pico = cap[cap["Periodo"] == "Pico"] if (cap["Periodo"] == "Pico").any() else cap
+    fila_lim = pico.loc[pico["Uso de capacidad (%)"].idxmax()]
+    margen = 100 * (100 / fila_lim["Uso de capacidad (%)"] - 1)
+    filas.append({"Indicador": "Margen antes de saturarse (hora pico)", "Resultado": f"{margen:.0f} % más tráfico".replace(".", ","),
+                  "Detalle": f"el primero en saturarse sería {fila_lim['Semáforo']} · {fila_lim['Ubicación']} "
+                             f"(hoy usa el {fila_lim['Uso de capacidad (%)']:.0f} % de su capacidad)"})
+    if h["dia"].nunique() > 1:
+        por_dia = h.groupby(["repeticion", "dia"])["pasan"].sum().groupby("dia").mean()
+        dias = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+        d_max = por_dia.idxmax()
+        filas.append({"Indicador": "Día con más tráfico del periodo",
+                      "Resultado": f"{dias[d_max.weekday()]} {d_max:%d/%m/%Y}",
+                      "Detalle": f"{por_dia.max():,.0f} vehículos; la diferencia entre días es pequeña porque todos los "
+                                 "días usan los mismos datos de campo".replace(",", ".")})
+    maximo = f"{top['veh'].iloc[0]:,.0f}".replace(",", ".")
+    frases.append(f"Para transitar con menos carros conviene evitar {' y '.join(rot(i) for i in top.index[:2])}; "
+                  f"en esas horas pasan hasta {maximo} vehículos por hora.")
+    frases.append(f"La entrada con menos espera es {s_menos} ({sem.loc[s_menos, 'Ubicación']}) y la de más espera es "
+                  f"{s_mas} ({sem.loc[s_mas, 'Ubicación']}).")
+    frases.append(f"En hora pico el cruce aguanta cerca de {margen:.0f} % más tráfico antes de que "
+                  f"{fila_lim['Semáforo']} ({fila_lim['Ubicación']}) se sature.")
+    return pd.DataFrame(filas), frases
+
+
 def flujo_por_franja(base: pd.DataFrame) -> pd.DataFrame:
     """Flujo observado en campo por franja horaria: vehículos por hora = pasan por ciclo × 3600 ÷ ciclo (s).
 
@@ -402,6 +467,8 @@ def construir(res: ResultadoPrediccion, semaforos: dict[str, DatosSemaforo], bas
             + (f"Las repeticiones 2 a {e.repeticiones} siguen la misma secuencia a continuación "
                f"({2 * int(res.info_semaforos['ciclos'].sum())} números cada una)." if e.repeticiones > 1 else "")),
     }
+    t["Conclusiones"], frases = conclusiones(res, t)
+    notas["Conclusiones"] = " ".join(frases)
     graficos = {"bloques": b, "horas": hr, "bloques_ciclos": bc, "barrido": barrido, "convergencia": conv,
                 "ciclos": res.ciclos[["semaforo", "periodo", "pasan", "quedan", "llegadas"]]}
     fila_tot = t["Precisión"].iloc[0]

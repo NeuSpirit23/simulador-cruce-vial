@@ -178,6 +178,9 @@ def excel_paquete(p: Paquete) -> bytes:
         b.border = _borde
         f += 1
     f += 1
+    _, f = _tabla_excel(ws, t["Conclusiones"], f, titulo="Conclusiones de la simulación")
+    ws.cell(f + 1, 1, p.notas["Conclusiones"]).font = Font(italic=True, size=10, color="1d3b5a")
+    f += 3
     _, f = _tabla_excel(ws, t["Parámetros"], f, titulo="Parámetros de la simulación")
     f += 2
     _, f = _tabla_excel(ws, t["Semáforos"], f, titulo="Resultados por semáforo")
@@ -461,6 +464,11 @@ def pdf_paquete(p: Paquete) -> bytes:
     h.append(lado)
 
     h.append(PageBreak())
+    h.append(KeepTogether([Paragraph("Conclusiones de la simulación", _H1),
+                           Paragraph(p.notas["Conclusiones"], ParagraphStyle("conc", parent=_NOTA, fontSize=10,
+                                                                             textColor=colors.HexColor("#1d3b5a"))),
+                           _tabla_pdf(t["Conclusiones"], W, anchos_rel=[1.4, 1.8, 3.6])]))
+    h.append(Spacer(1, 0.3 * cm))
     h.append(KeepTogether([Paragraph("Resultados por semáforo", _H1), _tabla_pdf(t["Semáforos"], W)]))
     h.append(Spacer(1, 0.3 * cm))
     h.append(KeepTogether([Paragraph("Precisión de la predicción (confianza 99 %, error objetivo ≤ 1 %)", _H1),

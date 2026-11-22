@@ -237,13 +237,25 @@ st.markdown(hero("Simulador del cruce vial · vía Mesa–Girardot",
                   ("⏰ Pico", texto_horas_pico())]), unsafe_allow_html=True)
 
 
+@st.cache_data(show_spinner=False, max_entries=6)
+def paquete_zip(inicio, fin, repeticiones, semilla, factor, horas_bloque, ciclos_bloque):
+    """Un solo archivo .zip con el reporte en Excel, el reporte en PDF y los datos de campo (Excel y PDF)."""
+    import io, zipfile
+    x, p_ = archivos(inicio, fin, repeticiones, semilla, factor, horas_bloque, ciclos_bloque)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(f"{archivo}.xlsx", x)
+        z.writestr(f"{archivo}.pdf", p_)
+        z.writestr("datos_campo_cruce_vial.xlsx", campo_xlsx())
+        z.writestr("datos_campo_cruce_vial.pdf", campo_pdf())
+    return buf.getvalue()
+
+
 def descargas(clave):
-    c1, c2 = st.columns(2)
-    c1.download_button("⬇ Descargar todo en Excel", xlsx, f"{archivo}.xlsx", key=f"x_{clave}",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                       use_container_width=True, type="primary")
-    c2.download_button("⬇ Descargar todo en PDF", pdf, f"{archivo}.pdf", key=f"p_{clave}",
-                       mime="application/pdf", use_container_width=True, type="primary")
+    st.download_button("⬇️ Descargar todo (Excel + PDF + datos de campo)",
+                       paquete_zip(*args, horas_bloque, ciclos_bloque), f"{archivo}.zip", key=f"zip_{clave}",
+                       mime="application/zip", use_container_width=True, type="primary",
+                       help="Un solo archivo .zip con el reporte completo en Excel y en PDF, y los datos de campo.")
 
 
 def grafico_valle_pico():
@@ -267,6 +279,8 @@ def grafico_horas(clave):
     st.plotly_chart(fig, use_container_width=True, key=f"horas_{clave}")
 
 
+descargas("global")
+
 tabs = st.tabs(["📊 Resumen", "📑 Reportes", "🚗 Simulación en vivo", "🚦 Capacidad",
                 "✅ Validación", "📋 Datos de campo", "🎲 Generador", "📘 Cómo funciona"])
 
@@ -274,6 +288,18 @@ tabs = st.tabs(["📊 Resumen", "📑 Reportes", "🚗 Simulación en vivo", "�
 # 1. Resumen
 # ---------------------------------------------------------------------------
 with tabs[0]:
+    st.markdown(seccion("🧭", "Conclusiones de la simulación", "Calculadas solas con los resultados: sirven para decidir "
+                        "a qué horas y por qué entrada hay más o menos tráfico."), unsafe_allow_html=True)
+    st.markdown(nota("💡 " + pq.notas["Conclusiones"]), unsafe_allow_html=True)
+    conc = T["Conclusiones"]
+    cols_c = st.columns(4)
+    for i, (_, fila) in enumerate(conc.iterrows()):
+        with cols_c[i % 4]:
+            st.markdown(f'<div class="kpi" style="--c:{["#C73E1D", VERDE, PICO, "#C73E1D", VERDE, "#1f6f8b", "#7c3aed", "#64748b"][i % 8]};'
+                        f'margin-bottom:12px"><div class="et">{fila["Indicador"]}</div>'
+                        f'<div class="va" style="font-size:1.05rem">{fila["Resultado"]}</div>'
+                        f'<div class="su">{fila["Detalle"]}</div></div>', unsafe_allow_html=True)
+    st.markdown(seccion("📊", "Indicadores principales"), unsafe_allow_html=True)
     st.markdown(kpis([
         ("Vehículos que pasan", mil(K["Vehículos que pasan"]), f"± {mil(K['Margen ± IC 99 %'])} (IC 99 %)", "#0f2a44"),
         ("Promedio por hora", mil(K["Promedio por hora"]), f"en {mil(K['Horas simuladas'], 1)} h simuladas", "#1f6f8b"),
@@ -290,7 +316,6 @@ with tabs[0]:
         v, p = K["Promedio por hora valle"], K["Promedio por hora pico"]
         st.markdown(nota(f"📈 En <b>hora pico</b> pasan en promedio <b>{mil(p)} vehículos por hora</b>, frente a "
                          f"<b>{mil(v)}</b> en hora valle: un <b>{mil(100 * (p / v - 1), 1)} % más</b>."), unsafe_allow_html=True)
-    descargas("resumen")
     prec = T["Precisión"]
     rep_necesarias = int(np.nanmax(prec["Repeticiones para error ≤ 1 %"])) if prec["Repeticiones para error ≤ 1 %"].notna().any() else 2
     err_tot = K.get("Error relativo IC 99 % (%)", float("nan"))
@@ -352,7 +377,6 @@ with tabs[0]:
 with tabs[1]:
     st.markdown(nota("📑 Todos los reportes incluyen <b>hora valle y hora pico</b>. El tamaño de los bloques se "
                      "cambia en la barra lateral. Los valores son el promedio de las repeticiones."), unsafe_allow_html=True)
-    descargas("reportes")
     st.markdown(seccion("🕑", f"1 · Por bloques de {horas_bloque} h", pq.notas[nombre_bh]), unsafe_allow_html=True)
     b = G["bloques"]
     fig = go.Figure()
@@ -520,12 +544,6 @@ with tabs[4]:
 # ---------------------------------------------------------------------------
 with tabs[5]:
     st.markdown(f"Registro manual por ciclo (verde → rojo): **{len(campo)} ciclos** en los cuatro semáforos.")
-    c1, c2 = st.columns(2)
-    c1.download_button("⬇ Datos de campo en Excel", campo_xlsx(), "datos_campo_cruce_vial.xlsx",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                       use_container_width=True)
-    c2.download_button("⬇ Datos de campo en PDF", campo_pdf(), "datos_campo_cruce_vial.pdf",
-                       mime="application/pdf", use_container_width=True)
     tabla(T["Datos de campo (resumen)"])
     st.markdown(seccion("📈", "¿En qué franjas hay más flujo? (datos de campo)"), unsafe_allow_html=True)
     st.caption("Vehículos por hora = carros que pasan por ciclo × 3600 ÷ duración del ciclo (s). "
