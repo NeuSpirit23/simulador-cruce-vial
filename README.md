@@ -86,6 +86,8 @@ En cada ciclo, para cada semáforo:
 
 **Supuestos:** se cuenta el total de vehículos por semáforo (no se separan giros), no se miden amarillo ni despeje, y cada semáforo se simula por separado. Las horas que no se midieron (noche, madrugada, fines de semana) se tratan como hora valle.
 
+**Precisión:** los intervalos son al **99 % de confianza** (`± 2,576 · s ÷ √R`). La app calcula el error relativo de cada resultado (`semiancho ÷ promedio`) y cuántas repeticiones hacen falta para que quede en **1 % o menos**: `R* = (2,576 · s ÷ (0,01 · promedio))²`, con un botón para ajustarlas.
+
 ---
 
 > La vista satelital y la 3D cargan sus librerías desde internet (Leaflet, three.js e imágenes de Esri), así que necesitan conexión.
@@ -103,6 +105,7 @@ simulador/paquete.py    Arma todos los reportes (los mismos en app, Excel y PDF)
 simulador/exportar.py   Exportación a Excel y PDF
 simulador/mapa.py       Ubicación del cruce y enlaces de Google Maps / Street View
 simulador/visor.py      Simulación en vivo: mapa satelital + maqueta 3D (Leaflet + three.js)
+simulador/geometria.py  Calles reales del cruce (trazadas sobre Google Maps), sentidos y rutas de giro
 simulador/estilo.py     Estilo visual (tema, tarjetas, gráficas)
 simulador/pruebas.py    Pruebas de uniformidad (Coss Bu, cap. 3)
 data/registro_transito.xlsx   Datos de campo

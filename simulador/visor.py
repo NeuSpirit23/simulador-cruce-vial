@@ -62,65 +62,31 @@ _PLANTILLA = r"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <div id="tablero"></div>
 <script>
 const D = __DATOS__;
-// ---------------------------------------------------------------- utilidades geométricas (metros)
+// ---------------------------------------------------------------- geometría (metros: x = este, y = norte)
 const rad = g => g*Math.PI/180;
-const uDe = rumbo => [Math.sin(rad(rumbo)), Math.cos(rad(rumbo))];        // vector unitario (x este, y norte)
-const derecha = v => [v[1], -v[0]];                                        // giro 90° horario
-const suma = (a,b,k=1) => [a[0]+b[0]*k, a[1]+b[1]*k];
 const rumboDe = v => (Math.atan2(v[0], v[1])*180/Math.PI + 360) % 360;
-const CARRIL = 2.6, BORDE = 8;
-
 // generador congruencial del curso para escoger destinos (mismo que la simulación)
 let X = D.semilla % 2147483647 || 1;
 const U = () => (X = (16807 * X) % 2147483647) / 2147483647;
-
-const S = D.semaforos.map(s => {
-  const u = uDe(s.rumbo);
-  return Object.assign(s, {u, dentro:[-u[0],-u[1]], cola:[], moviendo:[], total:0, ultimoCiclo:-1,
-                           salidos:0, giros:{izq:0, recto:0, der:0}});
-});
-// punto sobre el carril de entrada (hacia el cruce) o de salida (alejándose) de una calle
-const pEntrada = (s, r) => suma([s.u[0]*r, s.u[1]*r], derecha(s.dentro), CARRIL);
-const pSalida  = (s, r) => suma([s.u[0]*r, s.u[1]*r], derecha(s.u), CARRIL);
-
-function cruceLineas(p, d, q, e){            // intersección de p + t·d con q + s·e
-  const den = d[0]*e[1] - d[1]*e[0];
-  if (Math.abs(den) < 0.15) return null;
-  const t = ((q[0]-p[0])*e[1] - (q[1]-p[1])*e[0]) / den;
-  return [p[0]+d[0]*t, p[1]+d[1]*t];
+// punto y rumbo a una distancia d sobre una polilínea (pts) con largos acumulados (L)
+function enLinea(pts, L, d){
+  d = Math.max(0, Math.min(L[L.length-1], d));
+  let lo = 1, hi = L.length - 1;
+  while (lo < hi){ const mid = (lo + hi) >> 1; if (L[mid] < d) lo = mid + 1; else hi = mid; }
+  const a = pts[lo-1], b = pts[lo], f = (d - L[lo-1]) / ((L[lo] - L[lo-1]) || 1);
+  return {p:[a[0] + (b[0]-a[0])*f, a[1] + (b[1]-a[1])*f], rumbo: rumboDe([b[0]-a[0], b[1]-a[1]])};
 }
-function tipoGiro(a, b){
-  const z = a.dentro[0]*b.u[1] - a.dentro[1]*b.u[0];
-  return z > 0.35 ? "izq" : (z < -0.35 ? "der" : "recto");
-}
-function ruta(a, b){                         // lista de puntos desde la línea de pare de a hasta salir por b
-  const p0 = pEntrada(a, a.pare), p1 = pEntrada(a, BORDE), p2 = pSalida(b, BORDE), p3 = pSalida(b, 95);
-  let c = cruceLineas(p1, a.dentro, p2, b.u);
-  if (!c || Math.hypot(c[0], c[1]) > 25) c = [(p1[0]+p2[0])/2*0.5, (p1[1]+p2[1])/2*0.5];
-  const pts = [p0];
-  for (let i = 0; i <= 14; i++){              // curva de Bézier cuadrática dentro del cruce
-    const t = i/14, m = 1-t;
-    pts.push([m*m*p1[0] + 2*m*t*c[0] + t*t*p2[0], m*m*p1[1] + 2*m*t*c[1] + t*t*p2[1]]);
-  }
-  pts.push(p3);
-  const L = [0];
-  for (let i = 1; i < pts.length; i++) L.push(L[i-1] + Math.hypot(pts[i][0]-pts[i-1][0], pts[i][1]-pts[i-1][1]));
-  return {pts, L, largo: L[L.length-1]};
-}
-function enRuta(r, d){                        // posición y rumbo a una distancia d de la ruta
-  let i = 1; while (i < r.L.length-1 && r.L[i] < d) i++;
-  const a = r.pts[i-1], b = r.pts[i], f = Math.min(1, Math.max(0, (d - r.L[i-1]) / ((r.L[i]-r.L[i-1]) || 1)));
-  return {p:[a[0]+(b[0]-a[0])*f, a[1]+(b[1]-a[1])*f], rumbo: rumboDe([b[0]-a[0], b[1]-a[1]])};
-}
-// destinos posibles de cada semáforo, con su tipo de giro y probabilidad
+const S = D.semaforos.map(s => Object.assign(s, {cola:[], moviendo:[], total:0, ultimoCiclo:-1, salidos:0,
+                                                  giros:{izq:0, recto:0, der:0}}));
+// probabilidad de cada destino según el tipo de giro
 S.forEach(a => {
-  a.destinos = S.filter(b => b !== a).map(b => ({b, tipo: tipoGiro(a, b), ruta: ruta(a, b)}));
   const peso = {izq: D.prob.izq, recto: D.prob.recto, der: D.prob.der};
-  const tot = a.destinos.reduce((s, d) => s + peso[d.tipo], 0) || 1;
+  const tot = a.rutas.reduce((x, r) => x + peso[r.tipo], 0) || 1;
   let acum = 0;
-  a.destinos.forEach(d => { acum += peso[d.tipo] / tot; d.hasta = acum; });
+  a.rutas.forEach(r => { acum += peso[r.tipo] / tot; r.hasta = acum; });
 });
 const COLOR = {izq:"#a855f7", recto:"#22d3ee", der:"#facc15", cola:"#f8fafc"};
+const posCola = (s, i) => enLinea(s.entrada, s.Lentrada, s.pare - 1.5 - i*6.2);
 
 // ---------------------------------------------------------------- estado de cada semáforo en el tiempo t
 function estado(s, t){
@@ -135,7 +101,6 @@ function estado(s, t){
   return {k, verde:true, cola:s.espera[k]-salidos, salidos};
 }
 const MAX_COLA = 28, VEL = 12, MARGEN = 1.5;  // carros dibujados por cola; velocidad (m/s ≈ 43 km/h); margen de salida (s)
-const slot = (s, i) => pEntrada(s, s.pare + 1.5 + i*6.2);
 
 let t = 0, corriendo = false, ultimo = null;
 const tFinal = Math.max(...S.map(s => s.desfase + s.verde - s.ciclo + s.ciclo*s.espera.length)) + D.despeje + 8;
@@ -154,21 +119,22 @@ function paso(dtReal){
     // salen carros: el primero de la cola toma un destino al azar
     while (s.salidos < e.salidos){
       s.salidos++;
-      const r = U(); const d = s.destinos.find(x => r < x.hasta) || s.destinos[s.destinos.length-1];
+      const r = U(); const d = s.rutas.find(x => r < x.hasta) || s.rutas[s.rutas.length-1];
       s.giros[d.tipo]++;
       const c = s.cola.shift() || {id: Math.random()};
-      c.ruta = d.ruta; c.tipo = d.tipo; c.t0 = t; c.d = 0;
+      c.ruta = d; c.tipo = d.tipo; c.t0 = t; c.d = d.pare;
       s.moviendo.push(c);
     }
     // la cola visible sigue al conteo de la simulación
     const objetivo = Math.min(e.cola, MAX_COLA);
-    while (s.cola.length < objetivo){ const i = s.cola.length; const p = pEntrada(s, s.pare + 60 + i*6.2);
-      s.cola.push({id: Math.random(), x:p[0], y:p[1], rumbo: rumboDe(s.dentro)}); }
+    while (s.cola.length < objetivo){ const i = s.cola.length; const q = enLinea(s.entrada, s.Lentrada, s.pare - 60 - i*6.2);
+      s.cola.push({id: Math.random(), x:q.p[0], y:q.p[1], rumbo: q.rumbo}); }
     while (s.cola.length > objetivo) s.cola.pop();
-    s.cola.forEach((c, i) => { const p = slot(s, i), f = Math.min(1, dtMov*1.2);
-      c.x += (p[0]-c.x)*f; c.y += (p[1]-c.y)*f; c.rumbo = rumboDe(s.dentro); c.tipo = "cola"; });
-    s.moviendo = s.moviendo.filter(c => { c.d = VEL*(t - c.t0); if (c.d >= c.ruta.largo) return false;
-      const q = enRuta(c.ruta, c.d); c.x = q.p[0]; c.y = q.p[1]; c.rumbo = q.rumbo; return true; });
+    s.cola.forEach((c, i) => { const q = posCola(s, i), f = Math.min(1, dtMov*1.2);
+      c.x += (q.p[0]-c.x)*f; c.y += (q.p[1]-c.y)*f; c.rumbo = q.rumbo; c.tipo = "cola"; });
+    s.moviendo = s.moviendo.filter(c => { c.d = c.ruta.pare + VEL*(t - c.t0); const L = c.ruta.L;
+      if (c.d >= L[L.length-1]) return false;
+      const q = enLinea(c.ruta.pts, L, c.d); c.x = q.p[0]; c.y = q.p[1]; c.rumbo = q.rumbo; return true; });
   });
   vistas.forEach(v => v.dibujar());
   tablero();
@@ -232,10 +198,11 @@ document.querySelectorAll('#modo button').forEach(b => b.onclick = () => {
   const mapa = L.map('mapa', {zoomControl:true, attributionControl:true}).setView(c0, 19);
   L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     {maxZoom:21, maxNativeZoom:19, attribution:'Imágenes © Esri'}).addTo(mapa);
-  // carriles de entrada y salida (guías)
+  // ejes de las vías y carriles de llegada (guías)
+  D.vias.forEach(v => L.polyline(v.pts.map(ll), {color:'#ffffff', weight:1, opacity:.22, dashArray: v.doble ? null : '6 6'}).addTo(mapa));
   S.forEach(s => {
-    L.polyline([ll(pEntrada(s, s.pare + 80)), ll(pEntrada(s, s.pare))], {color:'#ffffff', weight:1.5, opacity:.45, dashArray:'4 6'}).addTo(mapa);
-    L.polyline([ll(pSalida(s, BORDE)), ll(pSalida(s, 95))], {color:'#ffffff', weight:1.5, opacity:.25, dashArray:'2 8'}).addTo(mapa);
+    const desde = Math.max(0, s.pare - 90), tramo = s.entrada.filter((p, i) => s.Lentrada[i] >= desde && s.Lentrada[i] <= s.pare);
+    L.polyline(tramo.map(ll), {color:'#ffffff', weight:1.5, opacity:.45, dashArray:'4 6'}).addTo(mapa);
     s.luz2d = L.circleMarker(ll([s.x, s.y]), {radius:9, color:'#111', weight:2, fillColor:'#ef4444', fillOpacity:1}).addTo(mapa);
     const r = (s.rumbo % 360 + 360) % 360;
     const dir = r < 45 || r >= 315 ? 'top' : r < 135 ? 'right' : r < 225 ? 'bottom' : 'left';
@@ -273,7 +240,7 @@ try {
   escena.background = new THREE.Color(0xbcd7ee);
   escena.fog = new THREE.Fog(0xbcd7ee, 160, 420);
   const cam = new THREE.PerspectiveCamera(45, 1, 0.5, 1000);
-  cam.position.set(70, 75, 85);
+  cam.position.set(95, 105, 120);
   const render = new THREE.WebGLRenderer({antialias:true});
   render.setPixelRatio(Math.min(2, window.devicePixelRatio));
   render.shadowMap.enabled = true;
@@ -288,60 +255,90 @@ try {
   const mat = c => new THREE.MeshStandardMaterial({color:c, roughness:.85});
   // suelo
   const suelo = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), mat(0x8fae74)); suelo.rotation.x = -Math.PI/2; suelo.receiveShadow = true; escena.add(suelo);
-  // vías
-  const via = mat(0x3b3f45), linea = new THREE.MeshBasicMaterial({color:0xf4f4f4}), amarilla = new THREE.MeshBasicMaterial({color:0xf2c230});
-  const plaza = new THREE.Mesh(new THREE.CircleGeometry(13, 40), via); plaza.rotation.x = -Math.PI/2; plaza.position.y = 0.02; plaza.receiveShadow = true; escena.add(plaza);
-  S.forEach(s => {
-    const largo = 140, g = new THREE.Mesh(new THREE.PlaneGeometry(10.5, largo), via);
-    g.rotation.x = -Math.PI/2; g.rotation.z = -rad(s.rumbo); const m = P(s.u[0]*largo/2, s.u[1]*largo/2);
-    g.position.set(m.x, 0.03, m.z); g.receiveShadow = true; escena.add(g);
-    // andén
-    [1, -1].forEach(lado => { const a = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.25, largo - 14), mat(0xc9c5bb));
-      const off = derecha(s.u), c = suma([s.u[0]*(largo/2 + 7), s.u[1]*(largo/2 + 7)], off, 6.4*lado);
-      a.position.copy(P(c[0], c[1])); a.position.y = 0.12; a.rotation.y = -rad(s.rumbo); a.receiveShadow = true; escena.add(a); });
-    // línea central amarilla y líneas de borde
-    const lc = new THREE.Mesh(new THREE.PlaneGeometry(0.25, largo - 14), amarilla);
-    const cc = [s.u[0]*(largo/2 + 7), s.u[1]*(largo/2 + 7)];
-    lc.rotation.x = -Math.PI/2; lc.rotation.z = -rad(s.rumbo); lc.position.set(P(...cc).x, 0.05, P(...cc).z); escena.add(lc);
-    // paso peatonal (cebra)
-    for (let i = -4; i <= 4; i++){ const z = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 3), linea);
-      const p = suma([s.u[0]*(BORDE + 4.5), s.u[1]*(BORDE + 4.5)], derecha(s.u), i*1.1);
-      z.rotation.x = -Math.PI/2; z.rotation.z = -rad(s.rumbo); z.position.set(P(...p).x, 0.05, P(...p).z); escena.add(z); }
+  // utilidades 2D para la escena
+  const sub = (a, b) => [a[0]-b[0], a[1]-b[1]], lon = v => Math.hypot(v[0], v[1]);
+  const der = v => { const n = lon(v) || 1; return [v[1]/n, -v[0]/n]; };
+  function distSeg(p, a, b){ const ab = sub(b, a), t = Math.max(0, Math.min(1, ((p[0]-a[0])*ab[0] + (p[1]-a[1])*ab[1]) / ((ab[0]**2 + ab[1]**2) || 1)));
+    return lon(sub(p, [a[0] + ab[0]*t, a[1] + ab[1]*t])); }
+  function franja(a, b, ancho, y, material){       // rectángulo plano de a a b
+    const v = sub(b, a), L = lon(v); if (L < 0.01) return;
+    const g = new THREE.Mesh(new THREE.PlaneGeometry(ancho, L), material);
+    g.rotation.x = -Math.PI/2; g.rotation.z = -Math.atan2(v[0], v[1]);
+    const c = P((a[0]+b[0])/2, (a[1]+b[1])/2); g.position.set(c.x, y, c.z); g.receiveShadow = true; escena.add(g);
+  }
+  function letrero(texto, pos, alto, escala, fondo){
+    const cv = document.createElement('canvas'); cv.width = 512; cv.height = 96; const cx = cv.getContext('2d');
+    cx.fillStyle = fondo || 'rgba(15,42,68,.9)'; cx.fillRect(0, 0, 512, 96); cx.fillStyle = '#fff'; cx.font = 'bold 40px sans-serif';
+    cx.textAlign = 'center'; cx.fillText(texto, 256, 62);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({map: new THREE.CanvasTexture(cv), depthTest: false}));
+    sp.scale.set(escala, escala * 96/512, 1); sp.position.copy(P(pos[0], pos[1])); sp.position.y = alto; escena.add(sp); return sp;
+  }
+  // vías reales del cruce (trazadas sobre la imagen de Google Maps)
+  const via = mat(0x3b3f45), anden = mat(0xcfcac0), blanca = new THREE.MeshBasicMaterial({color:0xf4f4f4}),
+        amarilla = new THREE.MeshBasicMaterial({color:0xf2c230});
+  D.vias.forEach(v => {
+    for (let i = 1; i < v.pts.length; i++){
+      const a = v.pts[i-1], b = v.pts[i], n = der(sub(b, a));
+      franja(a, b, v.ancho + 4.2, 0.012, anden);                     // andenes
+      franja(a, b, v.ancho, 0.03, via);                              // calzada
+      if (v.doble) franja(a, b, 0.25, 0.05, amarilla);               // línea central
+      else { const L = lon(sub(b, a)); for (let d = 2; d < L - 2; d += 7){ const f0 = d/L, f1 = Math.min(1, (d+3)/L);
+        franja([a[0]+(b[0]-a[0])*f0, a[1]+(b[1]-a[1])*f0], [a[0]+(b[0]-a[0])*f1, a[1]+(b[1]-a[1])*f1], 0.2, 0.05, blanca); } }
+    }
+    v.pts.forEach(p => { const d = new THREE.Mesh(new THREE.CircleGeometry(v.ancho/2, 24), via); d.rotation.x = -Math.PI/2;
+      const q = P(p[0], p[1]); d.position.set(q.x, 0.031, q.z); escena.add(d); });
   });
-  // edificios (aleatorios pero siempre iguales)
+  // nombres de las calles sobre el piso
+  D.vias.forEach(v => { const i = Math.max(1, Math.floor(v.pts.length/2)); const a = v.pts[i-1], b = v.pts[i];
+    letrero(v.nombre, [(a[0]*0.4 + b[0]*0.6), (a[1]*0.4 + b[1]*0.6)], 2.2, 18, 'rgba(31,41,55,.78)'); });
+  const plaza = new THREE.Mesh(new THREE.CircleGeometry(11, 40), via); plaza.rotation.x = -Math.PI/2; plaza.position.y = 0.035; escena.add(plaza);
+  // cebras en cada llegada al cruce
+  S.forEach(s => { const L = s.Lentrada, fin = L[L.length-1];
+    const q = enLinea(s.entrada, L, Math.min(s.pare + 3.5, fin - 2)); const dir = [Math.sin(rad(q.rumbo)), Math.cos(rad(q.rumbo))], n = der(dir);
+    for (let i = -4; i <= 4; i++){ const c = [q.p[0] + n[0]*i*1.1 - n[0]*2.6, q.p[1] + n[1]*i*1.1 - n[1]*2.6];
+      franja([c[0] - dir[0]*1.5, c[1] - dir[1]*1.5], [c[0] + dir[0]*1.5, c[1] + dir[1]*1.5], 0.6, 0.06, blanca); } });
+  // negocios de referencia (los que aparecen en el mapa)
+  D.referencias.forEach(r => {
+    const h = 5 + (r.nombre.length % 3);
+    const b = new THREE.Mesh(new THREE.BoxGeometry(11, h, 11), mat(0xece6db)); b.position.copy(P(r.p[0], r.p[1])); b.position.y = h/2;
+    b.castShadow = b.receiveShadow = true; escena.add(b);
+    const techo = new THREE.Mesh(new THREE.BoxGeometry(11.4, 0.6, 11.4), mat(new THREE.Color(r.color).getHex()));
+    techo.position.copy(b.position); techo.position.y = h + 0.3; escena.add(techo);
+    letrero(r.nombre, r.p, h + 3.2, 13, r.color);
+  });
+  // edificios genéricos fuera de las vías (siempre iguales)
   let sx = 7;  const rnd = () => (sx = (16807*sx) % 2147483647) / 2147483647;
-  const libre = (x, y) => S.every(s => { const d = x*s.u[0] + y*s.u[1]; const perp = Math.abs(x*s.u[1] - y*s.u[0]); return d < 0 || perp > 14; }) && Math.hypot(x, y) > 22;
+  const libre = (x, y, radio) => D.vias.every(v => { for (let i = 1; i < v.pts.length; i++)
+      if (distSeg([x, y], v.pts[i-1], v.pts[i]) < v.ancho/2 + 3 + radio) return false; return true; })
+    && D.referencias.every(r => Math.hypot(x - r.p[0], y - r.p[1]) > 10 + radio);
   const tonos = [0xe8e1d5, 0xd9cbb4, 0xc7d0d9, 0xe3d3c3, 0xb8c4b1, 0xf0e6da];
-  for (let i = 0; i < 160; i++){
-    const x = (rnd()-0.5)*260, y = (rnd()-0.5)*260; if (!libre(x, y)) continue;
-    const w = 8 + rnd()*14, d = 8 + rnd()*14, h = 3 + Math.pow(rnd(), 2)*18;
+  for (let i = 0; i < 420; i++){
+    const x = (rnd()-0.5)*320, y = (rnd()-0.5)*300, w = 7 + rnd()*12, d = 7 + rnd()*12;
+    if (!libre(x, y, Math.max(w, d)/2)) continue;
+    const h = 3 + Math.pow(rnd(), 2.2)*14;
     const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(tonos[Math.floor(rnd()*tonos.length)]));
     b.position.copy(P(x, y)); b.position.y = h/2; b.castShadow = b.receiveShadow = true; escena.add(b);
   }
   // árboles
-  for (let i = 0; i < 70; i++){ const x = (rnd()-0.5)*240, y = (rnd()-0.5)*240; if (!libre(x, y)) continue;
+  for (let i = 0; i < 160; i++){ const x = (rnd()-0.5)*300, y = (rnd()-0.5)*280; if (!libre(x, y, 2.5)) continue;
     const tr = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.3, 2.5), mat(0x6b4f2a)); tr.position.copy(P(x, y)); tr.position.y = 1.25; escena.add(tr);
     const co = new THREE.Mesh(new THREE.SphereGeometry(2 + rnd()*1.5, 10, 8), mat(0x4f7d3a)); co.position.copy(P(x, y)); co.position.y = 3.8; co.castShadow = true; escena.add(co); }
-  // semáforos: poste + cabeza con luz roja y verde
+  // semáforos: poste en la esquina y cabeza sobre el carril, mirando a los carros que llegan
   S.forEach(s => {
-    const base = pEntrada(s, s.pare), lado = suma(base, derecha(s.dentro), 4.2);
-    const poste = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 6), mat(0x2b2b2b));
-    poste.position.copy(P(...lado)); poste.position.y = 3; poste.castShadow = true; escena.add(poste);
-    const brazo = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 4.4), mat(0x2b2b2b));
-    const mitad = suma(lado, derecha(s.dentro), -2.1); brazo.position.copy(P(...mitad)); brazo.position.y = 6;
-    brazo.rotation.y = -rad(rumboDe(derecha(s.dentro))); escena.add(brazo);
-    const cab = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2, 0.6), mat(0x111111));
-    const pc = suma(lado, derecha(s.dentro), -4.1); cab.position.copy(P(...pc)); cab.position.y = 5.6; escena.add(cab);
+    const q = enLinea(s.entrada, s.Lentrada, s.pare), dir = [Math.sin(rad(q.rumbo)), Math.cos(rad(q.rumbo))], n = der(dir);
+    const poste = [q.p[0] + n[0]*4.5, q.p[1] + n[1]*4.5], cabeza = [q.p[0] - n[0]*0.3, q.p[1] - n[1]*0.3];
+    const pm = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 6.2), mat(0x2b2b2b)); pm.position.copy(P(...poste)); pm.position.y = 3.1; pm.castShadow = true; escena.add(pm);
+    const brazo = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, lon(sub(poste, cabeza))), mat(0x2b2b2b));
+    brazo.position.copy(P((poste[0]+cabeza[0])/2, (poste[1]+cabeza[1])/2)); brazo.position.y = 6.1;
+    brazo.rotation.y = -Math.atan2(n[0], n[1]); escena.add(brazo);
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2, 0.6), mat(0x111111)); cab.position.copy(P(...cabeza)); cab.position.y = 5.6;
+    cab.rotation.y = -Math.atan2(dir[0], dir[1]); escena.add(cab);
+    const frente = [cabeza[0] - dir[0]*0.35, cabeza[1] - dir[1]*0.35];
     const mk = (y, c) => { const m = new THREE.MeshStandardMaterial({color:c, emissive:c, emissiveIntensity:0.1});
-      const b = new THREE.Mesh(new THREE.SphereGeometry(0.28, 14, 10), m); b.position.copy(P(...suma(pc, s.dentro, -0.35))); b.position.y = y; escena.add(b); return m; };
+      const b = new THREE.Mesh(new THREE.SphereGeometry(0.28, 14, 10), m); b.position.copy(P(...frente)); b.position.y = y; escena.add(b); return m; };
     s.rojo3 = mk(6.15, 0xff3b30); s.verde3 = mk(5.05, 0x22c55e);
-    s.luzPunto = new THREE.PointLight(0xff3b30, 0, 14); s.luzPunto.position.copy(P(...pc)); s.luzPunto.position.y = 5.5; escena.add(s.luzPunto);
-    // letrero
-    const cv = document.createElement('canvas'); cv.width = 256; cv.height = 64; const cx = cv.getContext('2d');
-    cx.fillStyle = 'rgba(15,42,68,.9)'; cx.fillRect(0, 0, 256, 64); cx.fillStyle = '#fff'; cx.font = 'bold 30px sans-serif';
-    cx.fillText(s.id + ' · ' + s.nombre, 12, 43);
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({map: new THREE.CanvasTexture(cv)})); sp.scale.set(10, 2.5, 1);
-    sp.position.copy(P(...lado)); sp.position.y = 8.6; escena.add(sp);
+    s.luzPunto = new THREE.PointLight(0xff3b30, 0, 16); s.luzPunto.position.copy(P(...frente)); s.luzPunto.position.y = 5.5; escena.add(s.luzPunto);
+    letrero(s.id + ' · ' + s.nombre, poste, 9, 12);
   });
   // carros
   const colores = {izq:0xa855f7, recto:0x22d3ee, der:0xfacc15, cola:0xe5e7eb};
@@ -383,6 +380,9 @@ def _metros(lat0: float, lon0: float, lat: float, lon: float) -> tuple[float, fl
     return ((lon - lon0) * 111320 * math.cos(math.radians(lat0)), (lat - lat0) * 111320)
 
 
+from .geometria import REFERENCIAS, VIAS, construir_rutas
+
+
 def html_visor(ciclos: pd.DataFrame, info: pd.DataFrame, centro: tuple[float, float],
                posiciones: dict[str, dict], inicio_texto: str, semilla: int,
                prob_giros: dict | None = None, alto_vista: int = 470) -> str:
@@ -393,25 +393,27 @@ def html_visor(ciclos: pd.DataFrame, info: pd.DataFrame, centro: tuple[float, fl
     ciclo_comun = int(info["ciclo_s"].max())
     despeje = max(2.0, (ciclo_comun - int(info["verde_s"].sum())) / len(info))
     ciclo_comun = int(info["verde_s"].sum()) + despeje * len(info)
+    posiciones_m = {r["semaforo"]: _metros(centro[0], centro[1], posiciones[r["semaforo"]]["lat"],
+                                             posiciones[r["semaforo"]]["lon"]) for _, r in info.iterrows()}
+    rutas = construir_rutas(posiciones_m)
     semaforos = []
     desfase = 0.0
     for _, r in info.iterrows():
         s = r["semaforo"]
         d = ciclos[ciclos["semaforo"] == s].sort_values("ciclo")
-        pos = posiciones[s]
-        x, y = _metros(centro[0], centro[1], pos["lat"], pos["lon"])
-        rumbo = float(pos["rumbo"])
-        u = (math.sin(math.radians(rumbo)), math.cos(math.radians(rumbo)))
-        pare = max(9.0, x * u[0] + y * u[1])          # distancia de la línea de pare al centro, sobre la calle
+        x, y = posiciones_m[s]
+        g = rutas[s]
         semaforos.append({
             "id": s, "nombre": r["ubicacion"], "verde": int(r["verde_s"]), "ciclo": ciclo_comun,
-            "cicloReal": int(r["ciclo_s"]),
-            "desfase": desfase, "rumbo": rumbo, "x": x, "y": y, "pare": pare,
+            "cicloReal": int(r["ciclo_s"]), "desfase": desfase, "rumbo": float(posiciones[s]["rumbo"]),
+            "x": x, "y": y, "entrada": g["entrada"], "Lentrada": g["Lentrada"], "pare": g["pare"],
+            "rutas": g["rutas"],
             "espera": d["en_espera"].astype(int).tolist(), "pasan": d["pasan"].astype(int).tolist(),
             "quedan": d["quedan"].astype(int).tolist(),
         })
         desfase += int(r["verde_s"]) + despeje
     datos = {"centro": list(centro), "semaforos": semaforos, "inicio": inicio_texto,
+             "vias": VIAS, "referencias": REFERENCIAS,
              "semilla": int(semilla), "prob": prob, "cicloComun": ciclo_comun, "despeje": despeje}
     return (_PLANTILLA.replace("__DATOS__", json.dumps(datos))
             .replace("__ALTO_VISTA__", str(alto_vista)))
