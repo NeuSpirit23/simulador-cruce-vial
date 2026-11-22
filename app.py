@@ -324,7 +324,15 @@ with tabs[1]:
     st.markdown("### 5. Hora valle frente a hora pico")
     tabla(T["Valle vs pico"])
 
-    st.markdown("### 6. Por ciclo (los 4 semáforos)")
+    st.markdown("### 6. Números pseudoaleatorios: qué significa cada uno")
+    st.caption(pq.notas["Números pseudoaleatorios"])
+    nums = T["Números pseudoaleatorios"]
+    tabla(nums.head(20000), alto=460)
+    total_num = K["Números pseudoaleatorios"]
+    st.caption(f"Se muestran {mil(min(len(nums), 20000))} números de la repetición 1. En total la simulación usó "
+               f"{mil(total_num)} ({repeticiones} repeticiones). El Excel trae hasta {mil(len(nums))}.")
+
+    st.markdown("### 7. Por ciclo (los 4 semáforos)")
     st.caption("Repetición 1 (U1, U2, llegadas, cola…) y el promedio de cada ciclo entre todas las repeticiones.")
     pc = T["Por ciclo"]
     tabla(pc.head(20000), alto=420)
@@ -462,6 +470,8 @@ with tabs[6]:
                       "Decisión": "No se rechaza H₀" if r["no_se_rechaza"] else "Se rechaza H₀"})
     tabla(pd.DataFrame(filas))
     st.caption(f"Se prueban los primeros {mil(n_u)} números de la simulación actual, α = 0.05.")
+    st.markdown("**Primeros números de la secuencia y qué produjo cada uno** (la tabla completa está en *Reportes*)")
+    tabla(T["Números pseudoaleatorios"].head(20))
     st.plotly_chart(px.histogram(x=u, nbins=10, labels={"x": "U"}, title="Histograma de los U generados"),
                     use_container_width=True)
 

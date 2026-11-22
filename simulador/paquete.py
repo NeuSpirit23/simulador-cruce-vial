@@ -9,10 +9,12 @@ import math
 from dataclasses import dataclass, field
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 
 from .datos import PERIODOS, SEMAFOROS, DatosSemaforo
-from .modelo import Escenario, barrido_demanda, simular
+from .generador import A, M
+from .modelo import Escenario, barrido_demanda, simular, tabla_intervalos
 from .prediccion import FRANJA_MIN, ResultadoPrediccion, texto_horas_pico
 from .reportes import (reporte_bloques, reporte_bloques_ciclos, reporte_horas, reporte_semaforos,
                        reporte_valle_pico)
@@ -51,6 +53,66 @@ def _por_semaforo_y_periodo(res: ResultadoPrediccion) -> pd.DataFrame:
                 "Llegadas": m["llegadas"], "Cola prom. (veh)": m["cola_suma"] / m["ciclos"],
             })
     return pd.DataFrame(filas)
+
+
+MAX_NUMEROS_REPORTE = 200_000
+
+
+def secuencia_numeros(res: ResultadoPrediccion, semaforos: dict[str, DatosSemaforo],
+                      max_filas: int = MAX_NUMEROS_REPORTE) -> pd.DataFrame:
+    """Cada número pseudoaleatorio de la repetición 1, en el orden en que se generó, y qué produjo.
+
+    Orden: semáforo S1 (todos sus ciclos), luego S2, S3 y S4. En cada ciclo se generan 2 números:
+      U1 → cuántos carros llegan (tabla de llegadas del periodo)
+      U2 → cuántos llegan tarde y no alcanzan a pasar (tabla de "Quedan" del periodo)
+    X(n) = 16807 · X(n−1) mod 2147483647   y   U = X(n) ÷ 2147483647
+    """
+    e = res.escenario
+    orden = {s: i for i, s in enumerate(SEMAFOROS)}
+    c = res.ciclos.assign(_o=res.ciclos["semaforo"].map(orden)).sort_values(["_o", "ciclo"])
+    c = c.head((max_filas + 1) // 2).reset_index(drop=True)
+
+    # Secuencia X(n) desde la semilla
+    n_num = 2 * len(c)
+    xs = np.empty(n_num + 1, dtype=np.int64)
+    xs[0] = e.semilla % M
+    for i in range(1, n_num + 1):
+        xs[i] = (A * int(xs[i - 1])) % M
+
+    # Intervalo de la tabla donde cae cada U (por semáforo y periodo)
+    desde = {"U1": np.zeros(len(c)), "U2": np.zeros(len(c))}
+    hasta = {"U1": np.zeros(len(c)), "U2": np.zeros(len(c))}
+    valor = {"U1": np.zeros(len(c), dtype=int), "U2": np.zeros(len(c), dtype=int)}
+    for (s, p), idx in c.groupby(["semaforo", "periodo"]).groups.items():
+        sem = semaforos[s]
+        for uso, datos in (("U1", sem.llegadas[p]), ("U2", sem.quedan[p])):
+            t = tabla_intervalos(datos)
+            k = np.minimum(np.searchsorted(t["hasta"].to_numpy(), c.loc[idx, uso].to_numpy(), side="right"),
+                           len(t) - 1)
+            desde[uso][idx] = t["desde"].to_numpy()[k]
+            hasta[uso][idx] = t["hasta"].to_numpy()[k]
+            valor[uso][idx] = t["valor"].to_numpy()[k]
+
+    sufijo = f" (valor × {e.factor_demanda:g})" if e.factor_demanda != 1 else ""
+    res_u1 = "Llegan " + c["llegadas"].astype(str) + " carros" + sufijo
+    res_u2 = (c["rezagados"].astype(str) + " rezagados → pasan " + c["pasan"].astype(str) + ", quedan "
+              + c["quedan"].astype(str) + " (en espera " + c["en_espera"].astype(str) + ", capacidad "
+              + c["capacidad"].astype(str) + ")")
+
+    partes = []
+    for j, (uso, que, resultado) in enumerate((("U1", "Carros que llegan", res_u1),
+                                               ("U2", "Carros que no alcanzan a pasar", res_u2))):
+        pos = 2 * np.arange(len(c)) + j + 1          # posición en la secuencia
+        partes.append(pd.DataFrame({
+            "N°": pos, "Semáforo": c["semaforo"], "Ciclo": c["ciclo"], "Inicio del ciclo": c["inicio"],
+            "Periodo": c["periodo"], "Número": uso, "Para qué se usa": que,
+            "X anterior": xs[pos - 1], "X(n) = 16807·X anterior mod 2147483647": xs[pos],
+            "U = X(n) ÷ 2147483647": xs[pos] / M,
+            "Intervalo donde cae U": ["[" + f"{a:.4f}" + " ; " + f"{b:.4f}" + ")" for a, b in zip(desde[uso], hasta[uso])],
+            "Valor de la tabla": valor[uso], "Resultado en el ciclo": resultado,
+        }))
+    out = pd.concat(partes).sort_values("N°").reset_index(drop=True)
+    return out.head(max_filas)
 
 
 def flujo_por_franja(base: pd.DataFrame) -> pd.DataFrame:
@@ -191,6 +253,7 @@ def construir(res: ResultadoPrediccion, semaforos: dict[str, DatosSemaforo], bas
                                      "Llegadas prom.": ("llegadas", "mean")}
     ).reset_index().rename(columns={"semaforo": "Semáforo", "periodo": "Periodo"})
     t["Flujo por franja medida"] = flujo_por_franja(base)
+    t["Números pseudoaleatorios"] = secuencia_numeros(res, semaforos)
     t["Datos de campo"] = base.rename(columns={
         "semaforo": "Semáforo", "ubicacion": "Ubicación", "jornada": "Jornada", "periodo": "Periodo",
         "bloque": "Bloque horario", "iteracion": "Iteración", "pasan": "Pasan", "quedan": "Quedan",
@@ -208,6 +271,15 @@ def construir(res: ResultadoPrediccion, semaforos: dict[str, DatosSemaforo], bas
         "Capacidad": "Capacidad (veh/h) = pasan máx. por verde × 3600 ÷ ciclo. Uso = llegadas prom. ÷ capacidad "
                      "por verde. Si el uso llega a 100 %, el semáforo se satura.",
         "Validación": "Error = |simulado − observado| ÷ observado × 100 (1000 ciclos por semáforo).",
+        "Números pseudoaleatorios": (
+            f"Secuencia de la repetición 1, en el orden en que se generó, desde la semilla {e.semilla}. "
+            "Cada número sale del anterior: X(n) = 16807 · X(n−1) mod 2147483647, y U = X(n) ÷ 2147483647. "
+            "En cada ciclo se usan 2: U1 se busca en la tabla de llegadas del periodo (valle o pico) y dice cuántos "
+            "carros llegan; U2 se busca en la tabla de 'Quedan' y dice cuántos llegan tarde y no alcanzan a pasar. "
+            "Con eso: en espera = cola anterior + llegadas; pasan = mín(en espera − rezagados, capacidad); "
+            "quedan = en espera − pasan. "
+            + (f"Las repeticiones 2 a {e.repeticiones} siguen la misma secuencia a continuación "
+               f"({2 * int(res.info_semaforos['ciclos'].sum())} números cada una)." if e.repeticiones > 1 else "")),
     }
     graficos = {"bloques": b, "horas": hr, "bloques_ciclos": bc, "barrido": barrido}
     titulo = (f"Predicción del {e.inicio:%d/%m/%Y %H:%M} al {e.fin:%d/%m/%Y %H:%M}")

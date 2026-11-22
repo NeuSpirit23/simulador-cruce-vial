@@ -92,3 +92,19 @@ def test_horas_pico_salen_del_excel():
     from simulador.prediccion import VENTANAS_PICO, texto_horas_pico
     assert VENTANAS_PICO == [(12 * 60, 13 * 60), (17 * 60, 18 * 60 + 30)]
     assert texto_horas_pico() == "12:00–13:00 y 17:00–18:30"
+
+
+def test_secuencia_de_numeros_coincide_con_el_generador():
+    from datetime import datetime
+
+    import numpy as np
+
+    from simulador.paquete import secuencia_numeros
+    from simulador.prediccion import EscenarioPrediccion, predecir
+
+    sem = cargar_semaforos()
+    res = predecir(sem, EscenarioPrediccion(datetime(2026, 11, 23, 11), datetime(2026, 11, 23, 13), repeticiones=2))
+    d = secuencia_numeros(res, sem)
+    assert len(d) == 2 * res.info_semaforos["ciclos"].sum()
+    assert np.allclose(d["U = X(n) ÷ 2147483647"], GeneradorCongruencial(12345).lista(len(d)))
+    assert (d["X anterior"].iloc[1:].to_numpy() == d["X(n) = 16807·X anterior mod 2147483647"].iloc[:-1].to_numpy()).all()

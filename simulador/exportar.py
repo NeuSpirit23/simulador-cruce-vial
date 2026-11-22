@@ -41,7 +41,7 @@ MAX_FILAS_EXCEL = 1_000_000
 # ---------------------------------------------------------------------------
 def _decimales(col: str) -> int:
     c = col.lower()
-    if c in ("u1", "u2"):
+    if c in ("u1", "u2") or c.startswith("u ="):
         return 5
     if "veh/h" in c:
         return 0
@@ -267,6 +267,18 @@ def excel_paquete(p: Paquete) -> bytes:
     f = _titulo(ws, "Validación: simulado frente a observado", 1, p.notas["Validación"])
     _tabla_excel(ws, t["Validación"], f)
     _anchos(ws)
+
+    # --- Números pseudoaleatorios ------------------------------------------------
+    ws = wb.create_sheet("Números pseudoaleatorios")
+    f = _titulo(ws, "Números pseudoaleatorios generados y qué significa cada uno", 1)
+    ws.cell(f - 1, 1, p.notas["Números pseudoaleatorios"]).alignment = Alignment(wrap_text=True, vertical="top")
+    ws.merge_cells(start_row=f - 1, start_column=1, end_row=f - 1, end_column=13)
+    ws.row_dimensions[f - 1].height = 75
+    nums = t["Números pseudoaleatorios"]
+    _tabla_excel(ws, nums, f + 1, filtro=True)
+    _anchos(ws, maximo=60)
+    ws.column_dimensions["D"].width = 18
+    ws.freeze_panes = f"A{f + 2}"
 
     # --- Por ciclo --------------------------------------------------------------
     ws = wb.create_sheet("Por ciclo")
@@ -516,7 +528,17 @@ def pdf_paquete(p: Paquete) -> bytes:
     h.append(KeepTogether([Paragraph("Validación: simulado frente a observado", _H1),
                            Paragraph(p.notas["Validación"], _NOTA), _tabla_pdf(t["Validación"], W * 0.75)]))
 
-    # 6. Datos de campo
+    # 6. Números pseudoaleatorios
+    h.append(PageBreak())
+    h.append(Paragraph("Números pseudoaleatorios generados y qué significa cada uno", _H1))
+    h.append(Paragraph(p.notas["Números pseudoaleatorios"], _NOTA))
+    nums = t["Números pseudoaleatorios"].drop(columns=["Inicio del ciclo", "Para qué se usa"])
+    h.append(_tabla_pdf(nums, W, max_filas=160, anchos_rel=[0.5, 0.7, 0.5, 0.6, 0.6, 1.1, 1.3, 0.9, 1.3, 0.6, 3.4]))
+    if len(nums) > 160:
+        h.append(Paragraph(f"Se muestran los primeros 160 de {len(nums):,} números; el Excel tiene la secuencia "
+                           "completa.".replace(",", "."), _NOTA))
+
+    # 7. Datos de campo
     h.append(PageBreak())
     h.append(Paragraph("Datos de campo (resumen)", _H1))
     h.append(Paragraph(f"{len(t['Datos de campo'])} ciclos observados por registro manual, de verde a rojo.", _NOTA))
