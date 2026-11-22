@@ -108,3 +108,20 @@ def test_secuencia_de_numeros_coincide_con_el_generador():
     assert len(d) == 2 * res.info_semaforos["ciclos"].sum()
     assert np.allclose(d["U = X(n) ÷ 2147483647"], GeneradorCongruencial(12345).lista(len(d)))
     assert (d["X anterior"].iloc[1:].to_numpy() == d["X(n) = 16807·X anterior mod 2147483647"].iloc[:-1].to_numpy()).all()
+
+
+def test_explorador_suma_igual_que_la_simulacion():
+    from datetime import datetime
+    from simulador.datos import SEMAFOROS, cargar_semaforos
+    from simulador.explorador import explorar
+    from simulador.prediccion import EscenarioPrediccion, predecir
+    r = predecir(cargar_semaforos(), EscenarioPrediccion(datetime(2026, 11, 22, 6), datetime(2026, 11, 22, 20), 3, 7))
+    t, ind = explorar(r.ciclos, "horas", list(SEMAFOROS), desde=datetime(2026, 11, 22, 6),
+                      hasta=datetime(2026, 11, 22, 20), frecuencia_min=120)
+    assert list(t["Intervalo"]) == ["06:00–08:00", "08:00–10:00", "10:00–12:00", "12:00–14:00",
+                                    "14:00–16:00", "16:00–18:00", "18:00–20:00"]
+    assert abs(t["Pasan (veh)"].sum() - r.ciclos["pasan_prom"].sum()) < 1e-6
+    assert t.loc[t["Intervalo"] == "10:00–12:00", "Pasan en pico"].iloc[0] == 0
+    assert t.loc[t["Intervalo"] == "12:00–14:00", "Pasan en pico"].iloc[0] > 0
+    tc, _ = explorar(r.ciclos, "ciclos", ["S1"], ciclo_desde=1, ciclo_hasta=25, cada_ciclos=10)
+    assert list(tc["Ciclos"]) == [10, 10, 5]

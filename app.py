@@ -14,7 +14,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from simulador.datos import PERIODOS, SEMAFOROS, calcular_llegadas, cargar_semaforos, leer_base
-from simulador.exportar import _decimales, excel_datos_campo, excel_paquete, pdf_datos_campo, pdf_paquete
+from simulador.exportar import _decimales, excel_paquete, pdf_paquete
+from simulador.explorador import FRECUENCIAS_HORA, explorar
 from simulador.generador import GeneradorCongruencial
 from simulador.mapa import CENTRO_DEFECTO, POSICIONES_DEFECTO, enlaces_google
 from simulador.modelo import tabla_intervalos
@@ -211,16 +212,6 @@ def archivos(inicio, fin, repeticiones, semilla, factor, horas_bloque, ciclos_bl
     return excel_paquete(p), pdf_paquete(p)
 
 
-@st.cache_data
-def campo_xlsx():
-    return excel_datos_campo(campo)
-
-
-@st.cache_data
-def campo_pdf():
-    return pdf_datos_campo(campo)
-
-
 args = (inicio, fin, repeticiones, semilla, factor)
 res = correr(*args)
 pq = armar(*args, horas_bloque, ciclos_bloque)
@@ -238,25 +229,17 @@ st.markdown(hero("Simulador del cruce vial · vía Mesa–Girardot",
                   ("⏰ Pico", texto_horas_pico())]), unsafe_allow_html=True)
 
 
-@st.cache_data(show_spinner=False, max_entries=6)
-def paquete_zip(inicio, fin, repeticiones, semilla, factor, horas_bloque, ciclos_bloque):
-    """Un solo archivo .zip con el reporte en Excel, el reporte en PDF y los datos de campo (Excel y PDF)."""
-    import io, zipfile
-    x, p_ = archivos(inicio, fin, repeticiones, semilla, factor, horas_bloque, ciclos_bloque)
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr(f"{archivo}.xlsx", x)
-        z.writestr(f"{archivo}.pdf", p_)
-        z.writestr("datos_campo_cruce_vial.xlsx", campo_xlsx())
-        z.writestr("datos_campo_cruce_vial.pdf", campo_pdf())
-    return buf.getvalue()
-
-
-def descargas(clave):
-    st.download_button("⬇️ Descargar todo (Excel + PDF + datos de campo)",
-                       paquete_zip(*args, horas_bloque, ciclos_bloque), f"{archivo}.zip", key=f"zip_{clave}",
-                       mime="application/zip", use_container_width=True, type="primary",
-                       help="Un solo archivo .zip con el reporte completo en Excel y en PDF, y los datos de campo.")
+def descargas():
+    """Los dos únicos botones de descarga de la app: el reporte completo en Excel y en PDF."""
+    c1, c2 = st.columns(2)
+    c1.download_button("📗 Descargar Excel", xlsx, f"{archivo}.xlsx", key="desc_excel", type="primary",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                       use_container_width=True,
+                       help="Todas las hojas: resumen, conclusiones, bloques, por hora, por ciclo, mapa de calor, "
+                            "capacidad, validación, números pseudoaleatorios y datos de campo.")
+    c2.download_button("📕 Descargar PDF", pdf, f"{archivo}.pdf", key="desc_pdf", type="primary",
+                       mime="application/pdf", use_container_width=True,
+                       help="El mismo reporte en PDF, con gráficos y tablas, listo para imprimir o entregar.")
 
 
 def grafico_valle_pico():
@@ -280,7 +263,87 @@ def grafico_horas(clave):
     st.plotly_chart(fig, use_container_width=True, key=f"horas_{clave}")
 
 
-descargas("global")
+@st.fragment
+def explorador():
+    """Elegir de qué hora a qué hora (o de qué ciclo a qué ciclo) y cada cuánto agrupar. Solo se recalcula esta
+    sección, así que responde al instante."""
+    st.markdown(seccion("🔎", "Explorador: elija el tramo y la frecuencia",
+                        "Escoja de qué hora a qué hora (o de qué ciclo a qué ciclo) quiere ver los datos y cada cuánto "
+                        "agruparlos: 0–2, 2–4, 4–6… o cada N ciclos. Usa la simulación que ya está corrida, sin volver a "
+                        "simular. Las cifras son el promedio de las repeticiones."), unsafe_allow_html=True)
+    cic = res.ciclos
+    t_min, t_max = cic["inicio"].min().to_pydatetime(), fin
+    with st.container(border=True):
+        c0, c1, c2 = st.columns([1.1, 1.6, 1.3])
+        modo = c0.radio("Ver por", ["Horas", "Ciclos"], horizontal=True, key="exp_modo")
+        sems = c1.multiselect("Semáforos", SEMAFOROS, default=SEMAFOROS, key="exp_sems",
+                              format_func=lambda x: f"{x} · {semaforos[x].ubicacion}")
+        vista = c2.radio("Mostrar", ["Los 4 juntos", "Cada semáforo"], horizontal=True, key="exp_vista")
+        if modo == "Horas":
+            c1, c2, c3, c4, c5 = st.columns([1, .8, 1, .8, 1])
+            d_ini = c1.date_input("Desde el día", inicio.date(), min_value=inicio.date(), max_value=fin.date(),
+                                  format="DD/MM/YYYY", key="exp_dini")
+            h_ini_ = c2.time_input("hora", inicio.time(), step=1800, key="exp_hini")
+            d_fin = c3.date_input("Hasta el día", fin.date(), min_value=inicio.date(), max_value=fin.date(),
+                                  format="DD/MM/YYYY", key="exp_dfin")
+            h_fin_ = c4.time_input("hora ", fin.time(), step=1800, key="exp_hfin")
+            frec = c5.selectbox("Agrupar cada", list(FRECUENCIAS_HORA), index=2, key="exp_frec")
+            desde = max(datetime.combine(d_ini, h_ini_), inicio)
+            hasta = min(datetime.combine(d_fin, h_fin_), fin)
+            if hasta <= desde:
+                st.warning("La hora final debe ser posterior a la inicial (y dentro del periodo simulado).")
+                return
+            kw = dict(desde=desde, hasta=hasta, frecuencia_min=FRECUENCIAS_HORA[frec])
+        else:
+            max_c = int(cic["ciclo"].max())
+            c1, c2, c3 = st.columns(3)
+            cd = c1.number_input("Desde el ciclo", 1, max_c, 1, key="exp_cd")
+            ch = c2.number_input("Hasta el ciclo", 1, max_c, min(max_c, 100), key="exp_ch")
+            cada = c3.number_input("Agrupar cada (ciclos)", 1, max_c, 10, key="exp_cada")
+            if ch < cd:
+                st.warning("El ciclo final debe ser mayor o igual al inicial.")
+                return
+            kw = dict(ciclo_desde=int(cd), ciclo_hasta=int(ch), cada_ciclos=int(cada))
+    if not sems:
+        st.info("Escoja al menos un semáforo.")
+        return
+    por_sem = vista == "Cada semáforo"
+    t, ind = explorar(cic, "horas" if modo == "Horas" else "ciclos", sems, por_semaforo=por_sem, **kw)
+    if t.empty:
+        st.info("No hay ciclos en ese tramo.")
+        return
+    tramo = (f"{kw['desde']:%d/%m %H:%M} → {kw['hasta']:%d/%m %H:%M}" if modo == "Horas"
+             else f"ciclos {kw['ciclo_desde']} a {kw['ciclo_hasta']} ({ind['inicio']:%d/%m %H:%M} → {ind['fin']:%d/%m %H:%M})")
+    tarjetas = [
+        ("Vehículos que pasan", mil(ind["pasan"]), tramo, "#0f2a44"),
+        ("En hora valle", mil(ind["valle"]), f"{mil(100 * ind['valle'] / ind['pasan'], 1)} %" if ind["pasan"] else "", VALLE),
+        ("En hora pico", mil(ind["pico"]), f"{mil(100 * ind['pico'] / ind['pasan'], 1)} %" if ind["pasan"] else "", PICO),
+        ("Quedan en cola", mil(ind["cola_prom"], 1) + " veh", f"promedio por ciclo · máx. {ind['cola_max']}", "#64748b"),
+    ]
+    if modo == "Horas":
+        tarjetas[3:3] = [("Promedio por hora", mil(ind["veh_h"]), f"más alto: {ind['intervalo_max']}", "#1f6f8b")]
+    st.markdown(kpis(tarjetas), unsafe_allow_html=True)
+
+    eje = "Intervalo"
+    if por_sem:
+        fig = px.bar(t, x=eje, y="Pasan (veh)", color="Semáforo", barmode="group",
+                     labels={"Pasan (veh)": "Vehículos que pasan"})
+    else:
+        fig = go.Figure()
+        fig.add_bar(name="En hora valle", x=t[eje], y=t["Pasan en valle"], marker_color=VALLE)
+        fig.add_bar(name="En hora pico", x=t[eje], y=t["Pasan en pico"], marker_color=PICO)
+        fig.update_layout(barmode="stack", yaxis_title="Vehículos que pasan")
+    fig.update_layout(height=360, margin=dict(t=30), xaxis_title="", legend_title_text="")
+    st.plotly_chart(fig, use_container_width=True, key="exp_graf")
+    tabla(t.drop(columns=[c for c in ("Desde",) if c in t.columns]), alto=min(460, 40 + 35 * len(t)))
+    if modo == "Horas":
+        st.caption(f"Intervalo con más vehículos: {ind['intervalo_max']} · con menos: {ind['intervalo_min']}. "
+                   "Los intervalos se cuentan desde la medianoche; si el tramo empieza a mitad de uno, ese intervalo "
+                   "queda incompleto. La cola máxima es de la repetición 1. Estos datos están también en el Excel y el "
+                   "PDF por bloques de horas y de ciclos.")
+
+
+descargas()
 
 # --- Panel para llegar al 1 % de error ------------------------------------------------------------
 _prec = T["Precisión"]
@@ -444,6 +507,7 @@ with tabs[0]:
 # 2. Reportes (todo junto)
 # ---------------------------------------------------------------------------
 with tabs[1]:
+    explorador()
     st.markdown(nota("📑 Todos los reportes incluyen <b>hora valle y hora pico</b>. El tamaño de los bloques se "
                      "cambia en la barra lateral. Los valores son el promedio de las repeticiones."), unsafe_allow_html=True)
     st.markdown(seccion("🕑", f"1 · Por bloques de {horas_bloque} h", pq.notas[nombre_bh]), unsafe_allow_html=True)
