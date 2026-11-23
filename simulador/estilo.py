@@ -22,7 +22,7 @@ header[data-testid="stHeader"] { background: transparent; }
 .hero { background: linear-gradient(120deg, #0f2a44 0%, #16406a 55%, #1f6f8b 100%); color: #fff;
   border-radius: 18px; padding: 22px 28px; margin-bottom: 14px; position: relative; overflow: hidden;
   box-shadow: 0 10px 30px rgba(15,42,68,.18); }
-.hero:after { content: "🚦"; position: absolute; right: 26px; top: 6px; font-size: 92px; opacity: .14; }
+.hero:after { content: ""; position: absolute; right: 26px; top: 6px; font-size: 92px; opacity: .14; }
 .hero h1 { font-size: 1.85rem; font-weight: 800; margin: 0 0 2px 0; color: #fff; letter-spacing: -.02em; }
 .hero p { margin: 0; opacity: .85; font-size: .95rem; }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
@@ -42,6 +42,7 @@ header[data-testid="stHeader"] { background: transparent; }
 
 /* Títulos de sección */
 .sec { display: flex; align-items: center; gap: 10px; margin: 22px 0 6px; }
+.sec .barra { width: 5px; height: 26px; border-radius: 3px; background: #1f9d74; }
 .sec .ic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
   background: #e8f1fb; font-size: 18px; }
 .sec h3 { margin: 0; font-size: 1.15rem; font-weight: 700; color: #0f2a44; }
@@ -93,7 +94,8 @@ def kpis(items: list[tuple[str, str, str, str]]) -> str:
 
 def seccion(icono: str, titulo: str, descripcion: str = "") -> str:
     d = f'<div class="de">{descripcion}</div>' if descripcion else ""
-    return f'<div class="sec"><div class="ic">{icono}</div><h3>{titulo}</h3></div>{d}'
+    ic = f'<div class="ic">{icono}</div>' if icono.strip() else '<div class="barra"></div>'
+    return f'<div class="sec">{ic}<h3>{titulo}</h3></div>{d}'
 
 
 def nota(texto: str) -> str:
@@ -101,7 +103,8 @@ def nota(texto: str) -> str:
 
 
 def paso(n, texto: str) -> str:
-    return f'<div class="paso"><span>{n}</span>{texto}</div>'
+    marca = f'<span>{n}</span>' if str(n).strip() else ""
+    return f'<div class="paso">{marca}{texto}</div>'
 
 
 def configurar_plotly():

@@ -89,8 +89,8 @@ def html_mapa(ciclos: pd.DataFrame, info: pd.DataFrame, centro: tuple[float, flo
   .etiqueta:before {{ display:none; }}
 </style></head><body>
 <div id="barra">
-  <button id="play">▶ Iniciar</button>
-  <button id="reset">⟲ Reiniciar</button>
+  <button id="play">Iniciar</button>
+  <button id="reset">Reiniciar</button>
   <label>Velocidad <select id="vel">
     <option value="1">×1 (tiempo real)</option><option value="5">×5</option>
     <option value="10" selected>×10</option><option value="30">×30</option><option value="60">×60</option>
@@ -198,7 +198,7 @@ function actualizar(dtReal) {{
       En cola: <b>${{e.cola}}</b> · pasando este verde: <b>${{pasoAhora}}</b><br>
       Total que han pasado: <b>${{s.total + pasoAhora}}</b>`;
   }});
-  document.getElementById('reloj').textContent = '🕒 ' + formatoHora(t);
+  document.getElementById('reloj').textContent = '' + formatoHora(t);
 }}
 
 function bucle(ahora) {{
@@ -206,20 +206,20 @@ function bucle(ahora) {{
   const dt = ultimo === null ? 0 : (ahora - ultimo) / 1000;
   ultimo = ahora;
   t += dt * Number(document.getElementById('vel').value);
-  if (t >= tiempoFinal) {{ t = tiempoFinal; corriendo = false; document.getElementById('play').textContent = '▶ Iniciar'; }}
+  if (t >= tiempoFinal) {{ t = tiempoFinal; corriendo = false; document.getElementById('play').textContent = 'Iniciar'; }}
   actualizar(dt);
   if (corriendo) requestAnimationFrame(bucle);
 }}
 
 document.getElementById('play').onclick = () => {{
   corriendo = !corriendo; ultimo = null;
-  document.getElementById('play').textContent = corriendo ? '⏸ Pausar' : '▶ Continuar';
+  document.getElementById('play').textContent = corriendo ? 'Pausar' : 'Continuar';
   if (corriendo) requestAnimationFrame(bucle);
 }};
 document.getElementById('reset').onclick = () => {{
   t = 0; corriendo = false; ultimo = null;
   S.forEach(s => {{ s.total = 0; s.ultimoCiclo = -1; s.salidos = 0; s.moviendo.forEach(c => mapa.removeLayer(c.m)); s.moviendo = []; }});
-  document.getElementById('play').textContent = '▶ Iniciar';
+  document.getElementById('play').textContent = 'Iniciar';
   actualizar(0);
 }};
 actualizar(0);

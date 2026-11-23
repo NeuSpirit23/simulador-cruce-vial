@@ -28,7 +28,7 @@ from simulador.paquete import construir
 from simulador.estilo import CSS, PICO, VALLE, VERDE, configurar_plotly, hero, kpis, nota, paso, seccion
 from simulador.visor import html_visor
 
-st.set_page_config(page_title="Simulador cruce vial · Mesa–Girardot", page_icon="🚦", layout="wide",
+st.set_page_config(page_title="Simulador cruce vial · Mesa–Girardot", layout="wide",
                    initial_sidebar_state="expanded")
 st.markdown(CSS, unsafe_allow_html=True)
 configurar_plotly()
@@ -67,7 +67,7 @@ def tabla(df, alto=None):
 # ---------------------------------------------------------------------------
 # Barra lateral: periodo a predecir
 # ---------------------------------------------------------------------------
-st.sidebar.markdown("## 🚦 Panel de simulación")
+st.sidebar.markdown("## Panel de simulación")
 st.sidebar.caption("Defina el periodo y los números pseudoaleatorios. Todo se recalcula al instante.")
 # --- Los 3 parámetros enlazados: periodo ↔ ciclos ↔ números pseudoaleatorios -------------------
 DUR_CICLO = {s: semaforos[s].verde + semaforos[s].rojo for s in SEMAFOROS}
@@ -148,23 +148,23 @@ inicio = _inicio()
 fin = datetime.combine(ss.f_fin, ss.h_fin)
 seg_periodo = max(0, (fin - inicio).total_seconds())
 por_sem = ciclos_en(seg_periodo)
-sb.markdown('<div class="calc">🧮 <b>' + mil(seg_periodo / 3600, 2) + ' h</b> → ciclos por semáforo:<br>'
+sb.markdown('<div class="calc"><b>' + mil(seg_periodo / 3600, 2) + ' h</b> → ciclos por semáforo:<br>'
             + "<br>".join(f"{s}: {mil(seg_periodo)} ÷ {DUR_CICLO[s]} s = <b>{mil(por_sem[s])}</b>" for s in SEMAFOROS)
             + f"<br>Total <b>{mil(sum(por_sem.values()))}</b> ciclos × 2 × {ss.repeticiones} rep. = "
               f"<b>{mil(2 * sum(por_sem.values()) * ss.repeticiones)}</b> números</div>", unsafe_allow_html=True)
 
-sb.markdown(paso("📑", "Reportes"), unsafe_allow_html=True)
+sb.markdown(paso("", "Reportes"), unsafe_allow_html=True)
 c1, c2 = sb.columns(2)
 horas_bloque = c1.selectbox("Bloques de horas", [1, 2, 3, 4, 6, 8, 12, 24], index=1,
                             format_func=lambda h: f"{h} h")
 ciclos_bloque = c2.selectbox("Bloques de ciclos", [5, 10, 20, 30, 50, 100, 250, 500, 1000], index=1)
 
-sb.markdown(paso("🎛", "Escenario"), unsafe_allow_html=True)
+sb.markdown(paso("", "Escenario"), unsafe_allow_html=True)
 semilla = int(sb.number_input("Semilla del generador", 1, 2_147_483_646, 12345, step=1))
 factor = float(sb.slider("Demanda (1.0 = la observada)", 0.5, 3.0, 1.0, step=0.1,
                          help="1.2 significa que llegan 20 % más carros que en la toma de datos"))
 
-sb.markdown(paso("🔒", "Restricciones fijas del cruce"), unsafe_allow_html=True)
+sb.markdown(paso("", "Restricciones fijas del cruce"), unsafe_allow_html=True)
 sb.dataframe(pd.DataFrame([{"Semáforo": f"{s} {semaforos[s].ubicacion}", "Verde": f"{semaforos[s].verde} s",
                             "Rojo": f"{semaforos[s].rojo} s"} for s in SEMAFOROS]),
              hide_index=True, use_container_width=True)
@@ -247,25 +247,25 @@ archivo = f"simulacion_cruce_{inicio:%Y%m%d_%H%M}_{fin:%Y%m%d_%H%M}"
 
 st.markdown(hero("Simulador del cruce vial · vía Mesa–Girardot",
                  "Carrera 10 con Av. Ciudad de las Acacias, Girardot · Curso de Simulación · Universidad Piloto de Colombia",
-                 [("📅", f"{inicio:%d/%m/%Y %H:%M} → {fin:%d/%m/%Y %H:%M}"), ("🔁 Ciclos", mil(K["Ciclos"])),
-                  ("🎲 Números", mil(K["Números pseudoaleatorios"])), ("♻️ Repeticiones", str(repeticiones)),
-                  ("🌱 Semilla", str(semilla)), ("🚗 Demanda", f"×{factor:g}"),
-                  ("⏰ Pico", texto_horas_pico())]), unsafe_allow_html=True)
+                 [("", f"{inicio:%d/%m/%Y %H:%M} → {fin:%d/%m/%Y %H:%M}"), ("Ciclos", mil(K["Ciclos"])),
+                  ("Números", mil(K["Números pseudoaleatorios"])), ("Repeticiones", str(repeticiones)),
+                  ("Semilla", str(semilla)), ("Demanda", f"×{factor:g}"),
+                  ("Pico", texto_horas_pico())]), unsafe_allow_html=True)
 
 
 def descargas():
     """Los dos únicos botones de descarga de la app: el reporte completo en Excel y en PDF."""
     c1, c2 = st.columns(2)
-    c1.download_button("📗 Descargar Excel", xlsx, f"{archivo}.xlsx", key="desc_excel", type="primary",
+    c1.download_button("Descargar Excel", xlsx, f"{archivo}.xlsx", key="desc_excel", type="primary",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                        use_container_width=True,
                        help="Todas las hojas: resumen, conclusiones, bloques, por hora, por ciclo, mapa de calor, "
                             "capacidad, validación, números pseudoaleatorios y datos de campo.")
-    c2.download_button("📕 Descargar PDF", pdf, f"{archivo}.pdf", key="desc_pdf", type="primary",
+    c2.download_button("Descargar PDF", pdf, f"{archivo}.pdf", key="desc_pdf", type="primary",
                        mime="application/pdf", use_container_width=True,
                        help="El mismo reporte en PDF, con gráficos y tablas, listo para imprimir o entregar.")
-    st.caption(f"📎 Los dos archivos traen el resumen ejecutivo, todos los reportes y el tramo del explorador: "
-               f"{describir_tramo(tramo_cfg)}. Puede cambiarlo en 📑 Reportes → Explorador.")
+    st.caption(f"Los dos archivos traen el resumen ejecutivo, todos los reportes y el tramo del explorador: "
+               f"{describir_tramo(tramo_cfg)}. Puede cambiarlo en Reportes → Explorador.")
 
 
 def grafico_valle_pico():
@@ -293,7 +293,7 @@ def grafico_horas(clave):
 def explorador():
     """Elegir de qué hora a qué hora (o de qué ciclo a qué ciclo) y cada cuánto agrupar. Solo se recalcula esta
     sección, así que responde al instante."""
-    st.markdown(seccion("🔎", "Explorador: elija el tramo y la frecuencia",
+    st.markdown(seccion("", "Explorador: elija el tramo y la frecuencia",
                         "Escoja de qué hora a qué hora (o de qué ciclo a qué ciclo) quiere ver los datos y cada cuánto "
                         "agruparlos: 0–2, 2–4, 4–6… o cada N ciclos. Usa la simulación que ya está corrida, sin volver a "
                         "simular. Las cifras son el promedio de las repeticiones."), unsafe_allow_html=True)
@@ -338,8 +338,8 @@ def explorador():
     por_sem = vista == "Cada semáforo"
     c1, c2 = st.columns([1, 2.2], vertical_alignment="center")
     if cfg == tramo_cfg:
-        c1.button("✅ Este tramo ya va en el Excel y el PDF", disabled=True, use_container_width=True, key="exp_ya")
-    elif c1.button("📎 Usar este tramo en el Excel y el PDF", type="primary", use_container_width=True, key="exp_usar"):
+        c1.button("Este tramo ya va en el Excel y el PDF", disabled=True, use_container_width=True, key="exp_ya")
+    elif c1.button("Usar este tramo en el Excel y el PDF", type="primary", use_container_width=True, key="exp_usar"):
         ss["tramo_export"] = (args, cfg)
         st.rerun(scope="app")
     c2.caption("Al pulsarlo, los botones de descarga de arriba preparan el Excel y el PDF con una hoja y una página "
@@ -426,10 +426,10 @@ def _ajustar_ciclos():
 
 def panel_precision(clave):
     if _cumple_todo:
-        st.success(f"✅ Todos los resultados tienen error ≤ 1 % con confianza del 99 % "
+        st.success(f"Todos los resultados tienen error ≤ 1 % con confianza del 99 % "
                    f"(el mayor es {mil(_err_max, 2)} %). No hace falta ajustar nada.")
         return
-    with st.expander(f"⚠️ Hay resultados con más de 1 % de error (el mayor es {mil(_err_max, 2)} %). "
+    with st.expander(f"Hay resultados con más de 1 % de error (el mayor es {mil(_err_max, 2)} %). "
                      "Ver cómo ajustarlo", expanded=(clave == "global")):
         st.markdown(
             "Con los datos que puso, algunos resultados quedan por encima del **1 % de error** (confianza 99 %). "
@@ -440,7 +440,7 @@ def panel_precision(clave):
                         f"Repetir la simulación unas **{min(_rep_nec, 200)}** veces o más en lugar de {repeticiones}; "
                         "el programa simula y comprueba hasta que todo quede ≤ 1 %.  \n"
                         "`R = (2,576 × s ÷ (0,01 × promedio))²`")
-            st.button("🎯 Ajustar las repeticiones", on_click=_ajustar_repeticiones,
+            st.button("Ajustar las repeticiones", on_click=_ajustar_repeticiones,
                       key=f"rep_{clave}", type="primary", use_container_width=True)
             if _rep_nec > 200:
                 st.caption("Se necesitan más de 200; se ajusta al máximo. Combínelo con la opción 2.")
@@ -449,7 +449,7 @@ def panel_precision(clave):
                         f"Alargar el periodo a unos **{mil(_ciclos_nec)} ciclos** o más (hoy {mil(K['Ciclos'])}); el programa "
                         "simula y comprueba hasta encontrar los necesarios, y la hora final se corre sola.  \n"
                         "`ciclos = ciclos actuales × (error mayor ÷ 1 %)²`")
-            st.button("🔁 Ajustar los ciclos (y la hora final)", on_click=_ajustar_ciclos,
+            st.button("Ajustar los ciclos (y la hora final)", on_click=_ajustar_ciclos,
                       key=f"cic_{clave}", use_container_width=True)
         st.caption(f"La semilla actual es {semilla}. Cambiar la semilla mueve un poco los resultados, pero no reduce el "
                    "error de forma confiable: lo que lo reduce son más repeticiones o más ciclos.")
@@ -457,16 +457,16 @@ def panel_precision(clave):
 
 panel_precision("global")
 
-tabs = st.tabs(["📊 Resumen", "📑 Reportes", "🧪 Análisis y casos", "🚗 Simulación en vivo", "🚦 Capacidad",
-                "✅ Validación", "📋 Datos de campo", "🎲 Generador", "📘 Cómo funciona"])
+tabs = st.tabs(["Resumen", "Reportes", "Análisis y casos", "Simulación en vivo", "Capacidad",
+                "Validación", "Datos de campo", "Generador", "Cómo funciona"])
 
 # ---------------------------------------------------------------------------
 # 1. Resumen
 # ---------------------------------------------------------------------------
 with tabs[0]:
-    st.markdown(seccion("🧭", "Conclusiones de la simulación", "Calculadas solas con los resultados: sirven para decidir "
+    st.markdown(seccion("", "Conclusiones de la simulación", "Calculadas solas con los resultados: sirven para decidir "
                         "a qué horas y por qué entrada hay más o menos tráfico."), unsafe_allow_html=True)
-    st.markdown(nota("💡 " + pq.notas["Conclusiones"]), unsafe_allow_html=True)
+    st.markdown(nota("" + pq.notas["Conclusiones"]), unsafe_allow_html=True)
     conc = T["Conclusiones"]
     cols_c = st.columns(4)
     for i, (_, fila) in enumerate(conc.iterrows()):
@@ -475,7 +475,7 @@ with tabs[0]:
                         f'margin-bottom:12px"><div class="et">{fila["Indicador"]}</div>'
                         f'<div class="va" style="font-size:1.05rem">{fila["Resultado"]}</div>'
                         f'<div class="su">{fila["Detalle"]}</div></div>', unsafe_allow_html=True)
-    st.markdown(seccion("📊", "Indicadores principales"), unsafe_allow_html=True)
+    st.markdown(seccion("", "Indicadores principales"), unsafe_allow_html=True)
     st.markdown(kpis([
         ("Vehículos que pasan", mil(K["Vehículos que pasan"]), f"± {mil(K['Margen ± IC 99 %'])} (IC 99 %)", "#0f2a44"),
         ("Promedio por hora", mil(K["Promedio por hora"]), f"en {mil(K['Horas simuladas'], 1)} h simuladas", "#1f6f8b"),
@@ -490,13 +490,13 @@ with tabs[0]:
     ]), unsafe_allow_html=True)
     if "Promedio por hora valle" in K and "Promedio por hora pico" in K:
         v, p = K["Promedio por hora valle"], K["Promedio por hora pico"]
-        st.markdown(nota(f"📈 En <b>hora pico</b> pasan en promedio <b>{mil(p)} vehículos por hora</b>, frente a "
+        st.markdown(nota(f"En <b>hora pico</b> pasan en promedio <b>{mil(p)} vehículos por hora</b>, frente a "
                          f"<b>{mil(v)}</b> en hora valle: un <b>{mil(100 * (p / v - 1), 1)} % más</b>."), unsafe_allow_html=True)
     prec = T["Precisión"]
     rep_necesarias = int(np.nanmax(prec["Repeticiones para error ≤ 1 %"])) if prec["Repeticiones para error ≤ 1 %"].notna().any() else 2
     err_tot = K.get("Error relativo IC 99 % (%)", float("nan"))
     cumple = bool((prec["¿Cumple ≤ 1 %?"] == "Sí").all())
-    st.markdown(seccion("🎯", "Precisión de la predicción (confianza 99 %, error objetivo ≤ 1 %)", pq.notas["Precisión"]),
+    st.markdown(seccion("", "Precisión de la predicción (confianza 99 %, error objetivo ≤ 1 %)", pq.notas["Precisión"]),
                 unsafe_allow_html=True)
     st.markdown(kpis([
         ("Nivel de confianza", "99 %", "Z = 2,576", "#0f2a44"),
@@ -530,13 +530,13 @@ with tabs[0]:
         grafico_valle_pico()
     with c2, st.container(border=True):
         grafico_horas("resumen")
-    st.markdown(seccion("🚦", "Resultados por semáforo", ''), unsafe_allow_html=True)
+    st.markdown(seccion("", "Resultados por semáforo", ''), unsafe_allow_html=True)
     tabla(T["Semáforos"])
-    st.markdown(seccion("🌗", "Cada semáforo en hora valle y en hora pico", ''), unsafe_allow_html=True)
+    st.markdown(seccion("", "Cada semáforo en hora valle y en hora pico", ''), unsafe_allow_html=True)
     tabla(T["Semáforo y periodo"])
-    st.markdown(seccion("⚖️", "Hora valle frente a hora pico", 'Todo el periodo simulado.'), unsafe_allow_html=True)
+    st.markdown(seccion("", "Hora valle frente a hora pico", 'Todo el periodo simulado.'), unsafe_allow_html=True)
     tabla(T["Valle vs pico"])
-    with st.expander("⚙️ Parámetros de esta simulación"):
+    with st.expander("Parámetros de esta simulación"):
         tabla(T["Parámetros"])
 
 # ---------------------------------------------------------------------------
@@ -544,9 +544,9 @@ with tabs[0]:
 # ---------------------------------------------------------------------------
 with tabs[1]:
     explorador()
-    st.markdown(nota("📑 Todos los reportes incluyen <b>hora valle y hora pico</b>. El tamaño de los bloques se "
+    st.markdown(nota("Todos los reportes incluyen <b>hora valle y hora pico</b>. El tamaño de los bloques se "
                      "cambia en la barra lateral. Los valores son el promedio de las repeticiones."), unsafe_allow_html=True)
-    st.markdown(seccion("🕑", f"1 · Por bloques de {horas_bloque} h", pq.notas[nombre_bh]), unsafe_allow_html=True)
+    st.markdown(seccion("", f"1 · Por bloques de {horas_bloque} h", pq.notas[nombre_bh]), unsafe_allow_html=True)
     b = G["bloques"]
     fig = go.Figure()
     fig.add_bar(name="En hora valle", x=b["bloque"], y=b["en_valle"], marker_color=VALLE)
@@ -555,11 +555,11 @@ with tabs[1]:
     st.plotly_chart(fig, use_container_width=True)
     tabla(T[nombre_bh])
 
-    st.markdown(seccion("⏱️", "2 · Por hora", pq.notas["Por hora"]), unsafe_allow_html=True)
+    st.markdown(seccion("", "2 · Por hora", pq.notas["Por hora"]), unsafe_allow_html=True)
     grafico_horas("reportes")
     tabla(T["Por hora"], alto=420)
 
-    st.markdown(seccion("🔁", f"3 · Por bloques de {ciclos_bloque} ciclos", pq.notas[nombre_bc]), unsafe_allow_html=True)
+    st.markdown(seccion("", f"3 · Por bloques de {ciclos_bloque} ciclos", pq.notas[nombre_bc]), unsafe_allow_html=True)
     bc = G["bloques_ciclos"]
     fig = px.line(bc, x="desde", y="pasan", color="semaforo", markers=len(bc) < 200,
                   labels={"desde": "Inicio del bloque", "pasan": f"Vehículos en {ciclos_bloque} ciclos",
@@ -567,14 +567,14 @@ with tabs[1]:
     st.plotly_chart(fig, use_container_width=True)
     tabla(T[nombre_bc], alto=420)
 
-    st.markdown(seccion("🔥", "Mapa de calor: vehículos por día y hora", pq.notas["Mapa de calor"]), unsafe_allow_html=True)
+    st.markdown(seccion("", "Mapa de calor: vehículos por día y hora", pq.notas["Mapa de calor"]), unsafe_allow_html=True)
     mc = T["Mapa de calor (día × hora)"]
     figm = px.imshow(mc, aspect="auto", color_continuous_scale="YlOrRd", labels=dict(x="Hora del día", y="Día", color="Vehículos"),
                      text_auto=".0f" if mc.size <= 24 * 8 else False)
     figm.update_layout(height=max(260, 70 + 34 * len(mc)))
     st.plotly_chart(figm, use_container_width=True)
 
-    st.markdown(seccion("📦", "Diagramas de caja: vehículos que pasan por ciclo", pq.notas["Cajas"]), unsafe_allow_html=True)
+    st.markdown(seccion("", "Diagramas de caja: vehículos que pasan por ciclo", pq.notas["Cajas"]), unsafe_allow_html=True)
     cic = G["ciclos"]
     figb = px.box(cic, x="semaforo", y="pasan", color="periodo", category_orders={"periodo": ["Valle", "Pico"]},
                   color_discrete_map={"Valle": VALLE, "Pico": PICO},
@@ -582,7 +582,7 @@ with tabs[1]:
     figb.update_layout(height=380)
     st.plotly_chart(figb, use_container_width=True)
 
-    st.markdown(seccion("🚥", "Colas al final de cada verde", pq.notas["Colas"]), unsafe_allow_html=True)
+    st.markdown(seccion("", "Colas al final de cada verde", pq.notas["Colas"]), unsafe_allow_html=True)
     c1, c2 = st.columns([1.1, 1])
     with c1, st.container(border=True):
         figh = px.histogram(cic, x="quedan", color="semaforo", barmode="group", nbins=int(max(5, cic["quedan"].max() + 1)),
@@ -592,19 +592,19 @@ with tabs[1]:
     with c2:
         tabla(T["Colas"], alto=340)
 
-    st.markdown(seccion("🌗", "4 · Cada semáforo en hora valle y en hora pico"), unsafe_allow_html=True)
+    st.markdown(seccion("", "4 · Cada semáforo en hora valle y en hora pico"), unsafe_allow_html=True)
     tabla(T["Semáforo y periodo"])
-    st.markdown(seccion("⚖️", "5 · Hora valle frente a hora pico", ), unsafe_allow_html=True)
+    st.markdown(seccion("", "5 · Hora valle frente a hora pico", ), unsafe_allow_html=True)
     tabla(T["Valle vs pico"])
 
-    st.markdown(seccion("🎲", "6 · Números pseudoaleatorios: qué significa cada uno", pq.notas["Números pseudoaleatorios"]), unsafe_allow_html=True)
+    st.markdown(seccion("", "6 · Números pseudoaleatorios: qué significa cada uno", pq.notas["Números pseudoaleatorios"]), unsafe_allow_html=True)
     nums = T["Números pseudoaleatorios"]
     tabla(nums.head(20000), alto=460)
     total_num = K["Números pseudoaleatorios"]
     st.caption(f"Se muestran {mil(min(len(nums), 20000))} números de la repetición 1. En total la simulación usó "
                f"{mil(total_num)} ({repeticiones} repeticiones). El Excel trae hasta {mil(len(nums))}.")
 
-    st.markdown(seccion("🔍", "7 · Por ciclo (los 4 semáforos)", "Repetición 1 (U1, U2, llegadas, cola…) y el promedio de cada ciclo entre todas las repeticiones."), unsafe_allow_html=True)
+    st.markdown(seccion("", "7 · Por ciclo (los 4 semáforos)", "Repetición 1 (U1, U2, llegadas, cola…) y el promedio de cada ciclo entre todas las repeticiones."), unsafe_allow_html=True)
     pc = T["Por ciclo"]
     tabla(pc.head(20000), alto=420)
     if len(pc) > 20000:
@@ -620,7 +620,7 @@ def casos_prueba(inicio, fin, repeticiones, semilla, factor):
 
 
 with tabs[2]:
-    st.markdown(seccion("🗺️", "Esquema: cómo viaja cada dato por el simulador",
+    st.markdown(seccion("", "Esquema: cómo viaja cada dato por el simulador",
                         "De arriba abajo: lo que usted escribe en la barra lateral, cómo se convierte en números "
                         "pseudoaleatorios, cómo el modelo los usa ciclo a ciclo y en qué reportes termina."), unsafe_allow_html=True)
     st.graphviz_chart("""
@@ -652,7 +652,7 @@ digraph G {
 }
 """, use_container_width=True)
 
-    st.markdown(seccion("🧩", "Qué hace cada campo", "Qué es, qué parte de la simulación toca y cómo cambia el resultado."),
+    st.markdown(seccion("", "Qué hace cada campo", "Qué es, qué parte de la simulación toca y cómo cambia el resultado."),
                 unsafe_allow_html=True)
     cols_f = st.columns(3)
     for i, (_, f) in enumerate(CAMPOS.iterrows()):
@@ -662,7 +662,7 @@ digraph G {
                         f"<b>Cómo cambia:</b> {f['Cómo cambia la simulación']}</span>", unsafe_allow_html=True)
             st.code(f["Fórmula"], language=None, wrap_lines=True)
 
-    st.markdown(seccion("🧪", "Casos de prueba sobre su simulación actual",
+    st.markdown(seccion("", "Casos de prueba sobre su simulación actual",
                         "Cada caso cambia un solo campo y deja todo lo demás igual que su simulación. Así se ve qué "
                         "efecto tiene cada uno. Si cambia la barra lateral, los casos se vuelven a calcular con los nuevos "
                         "datos."), unsafe_allow_html=True)
@@ -670,7 +670,7 @@ digraph G {
     if total_ciclos_rep > 600_000 and not ss.get("casos_ok"):
         st.info(f"Su simulación es grande ({mil(total_ciclos_rep)} ciclos con repeticiones): los 5 casos pueden tardar "
                 "un poco. Pulse el botón para correrlos.")
-        if st.button("▶ Correr los casos de prueba", type="primary", key="casos_btn"):
+        if st.button("Correr los casos de prueba", type="primary", key="casos_btn"):
             ss["casos_ok"] = True
             st.rerun()
     else:
@@ -711,7 +711,7 @@ digraph G {
 # 3. Mapa en vivo
 # ---------------------------------------------------------------------------
 with tabs[3]:
-    st.markdown(nota("🚗 Reproducción de la simulación (repetición 1) desde el inicio del periodo, en el <b>mapa "
+    st.markdown(nota("Reproducción de la simulación (repetición 1) desde el inicio del periodo, en el <b>mapa "
                      "satelital</b> y en una <b>maqueta 3D</b> sincronizados. Los semáforos se ponen en verde uno tras "
                      "otro (S1 → S2 → S3 → S4). Cada carro que pasa escoge al azar si gira a la <b>izquierda</b> "
                      "(morado), sigue <b>derecho</b> (cian) o gira a la <b>derecha</b> (amarillo); los blancos esperan "
@@ -726,7 +726,7 @@ with tabs[3]:
                "En la animación los 4 semáforos comparten un ciclo de 134 s con las fases en orden (S1 25 s → S2 30 s → "
                "S3 25 s → S4 35 s) y 4,75 s de todo en rojo entre fases, para que nunca haya dos verdes a la vez y el "
                "cruce quede libre antes del siguiente verde. Los carros que pasan en cada ciclo son los de la simulación.")
-    with st.expander("📍 Ajustar la ubicación del cruce y de los semáforos"):
+    with st.expander("Ajustar la ubicación del cruce y de los semáforos"):
         st.caption("Cruce de la Carrera 10 con la Av. Ciudad de las Acacias (Girardot). Para sacar coordenadas: "
                    "en Google Maps, clic derecho sobre el punto y clic en los números (se copian). "
                    "Dirección = de dónde llegan los carros: 0 = norte, 90 = este, 180 = sur, 270 = oeste.")
@@ -748,7 +748,7 @@ with tabs[3]:
                                inicio.strftime("%Y-%m-%dT%H:%M:%S"), semilla,
                                {"izq": p_izq, "recto": 100 - p_izq - p_der, "der": p_der}), height=770)
 
-    st.markdown(seccion("🛣️", "Vista de la calle (Google Maps)", "Abre en otra pestaña Google Street View desde cada "
+    st.markdown(seccion("", "Vista de la calle (Google Maps)", "Abre en otra pestaña Google Street View desde cada "
                         "semáforo, mirando como el conductor que llega al cruce, o su ubicación en Google Maps."),
                 unsafe_allow_html=True)
     cols = st.columns(4)
@@ -757,8 +757,8 @@ with tabs[3]:
         with col:
             st.markdown(f"**{s_m} · {semaforos[s_m].ubicacion}**")
             st.caption(POSICIONES_DEFECTO[s_m]["via"])
-            st.link_button("👁 Street View", enl["street_view"], use_container_width=True)
-            st.link_button("📍 Google Maps", enl["mapa"], use_container_width=True)
+            st.link_button("Street View", enl["street_view"], use_container_width=True)
+            st.link_button("Google Maps", enl["mapa"], use_container_width=True)
 
 # ---------------------------------------------------------------------------
 # 4. Capacidad (valle y pico)
@@ -801,7 +801,7 @@ with tabs[5]:
     fig.add_bar(name="Simulado", x=etiquetas, y=val["Pasan simulado"])
     fig.update_layout(barmode="group", yaxis_title="Vehículos que pasan por ciclo")
     st.plotly_chart(fig, use_container_width=True)
-    st.markdown(seccion("🧪", "Prueba de ajuste de las llegadas (chi-cuadrado, 99 %)", pq.notas["Prueba de ajuste de llegadas"]),
+    st.markdown(seccion("", "Prueba de ajuste de las llegadas (chi-cuadrado, 99 %)", pq.notas["Prueba de ajuste de llegadas"]),
                 unsafe_allow_html=True)
     tabla(T["Prueba de ajuste de llegadas"])
 
@@ -811,11 +811,11 @@ with tabs[5]:
 with tabs[6]:
     st.markdown(f"Registro manual por ciclo (verde → rojo): **{len(campo)} ciclos** en los cuatro semáforos.")
     tabla(T["Datos de campo (resumen)"])
-    st.markdown(seccion("📈", "¿En qué franjas hay más flujo? (datos de campo)"), unsafe_allow_html=True)
+    st.markdown(seccion("", "¿En qué franjas hay más flujo? (datos de campo)"), unsafe_allow_html=True)
     st.caption("Vehículos por hora = carros que pasan por ciclo × 3600 ÷ duración del ciclo (s). "
                "'Cruce completo' suma los 4 semáforos y solo aparece si se midieron los 4 en esa franja.")
     tabla(T["Flujo por franja medida"])
-    st.markdown(seccion("🎯", "Tablas de codificación por intervalos de las llegadas (valle y pico)"), unsafe_allow_html=True)
+    st.markdown(seccion("", "Tablas de codificación por intervalos de las llegadas (valle y pico)"), unsafe_allow_html=True)
     st.caption("Si U cae en [desde, hasta), llegan 'valor' vehículos en ese ciclo.")
     for s_t in SEMAFOROS:
         st.markdown(f"**{s_t} · {semaforos[s_t].ubicacion}**")
@@ -849,7 +849,7 @@ with tabs[7]:
                       "Decisión": "No se rechaza H₀" if r["no_se_rechaza"] else "Se rechaza H₀"})
     tabla(pd.DataFrame(filas))
     st.caption(f"Se prueban los primeros {mil(n_u)} números de la simulación actual, α = 0.05.")
-    st.markdown(seccion("🔢", "Primeros números de la secuencia y qué produjo cada uno", "La tabla completa está en Reportes."), unsafe_allow_html=True)
+    st.markdown(seccion("", "Primeros números de la secuencia y qué produjo cada uno", "La tabla completa está en Reportes."), unsafe_allow_html=True)
     tabla(T["Números pseudoaleatorios"].head(20))
     st.plotly_chart(px.histogram(x=u, nbins=10, labels={"x": "U"}, title="Histograma de los U generados"),
                     use_container_width=True)

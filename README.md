@@ -50,7 +50,7 @@ Además se escogen las **repeticiones**, la **semilla**, el nivel de demanda y e
 
 **Restricciones fijas:** los 4 semáforos con sus tiempos (verde 25/30/25/35 s y rojo 99 s) y las **horas pico** 12:00–13:00 y 17:00–18:30, tal como quedaron marcadas en el Excel de campo (el programa las lee de ahí). El resto del día es hora valle. **Toda simulación debe incluir horas valle y horas pico**; si el periodo no las tiene, el programa avisa y no simula. El límite es de 4 millones de ciclos en total (ciclos × semáforos × repeticiones), por ejemplo un año completo con 3 repeticiones.
 
-**Descargas:** arriba, debajo del encabezado, hay solo dos botones: **📗 Descargar Excel** y **📕 Descargar PDF**. Los dos traen el resumen ejecutivo, todos los reportes, los datos de campo y el tramo elegido en el explorador.
+**Descargas:** arriba, debajo del encabezado, hay solo dos botones: **Descargar Excel** y **Descargar PDF**. Los dos traen el resumen ejecutivo, todos los reportes, los datos de campo y el tramo elegido en el explorador.
 
 | Pestaña | Qué muestra |
 |---|---|

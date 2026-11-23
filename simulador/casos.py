@@ -119,7 +119,7 @@ CAMPOS = pd.DataFrame([
      "No cambia la simulación: el total es el mismo, solo se reparte en más o menos filas.",
      "suma de los bloques = total de la simulación"),
     ("Explorador (Reportes)", "Ver un tramo de hora a hora o de ciclo a ciclo, con la frecuencia que se quiera.",
-     "La vista y, si se pulsa 📎, la hoja y la página del tramo en Excel y PDF.",
+     "La vista y, si se pulsa \"Usar este tramo en el Excel y el PDF\", la hoja y la página del tramo en Excel y PDF.",
      "No vuelve a simular: toma los ciclos ya simulados de ese tramo.",
      "vehículos del tramo = suma de los ciclos que empiezan dentro del tramo"),
     ("% de giros (Simulación en vivo)", "Qué parte de los carros gira a la izquierda, sigue derecho o gira a la derecha.",

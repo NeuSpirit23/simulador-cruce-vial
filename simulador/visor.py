@@ -51,12 +51,12 @@ _PLANTILLA = r"""<!DOCTYPE html><html><head><meta charset="utf-8">
  #aviso3d{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#cfd8e3;font-size:13px;text-align:center;padding:20px}
 </style></head><body>
 <div id="barra">
- <button id="play" class="prim">▶ Iniciar</button>
- <button id="reset">⟲ Reiniciar</button>
+ <button id="play" class="prim">Iniciar</button>
+ <button id="reset">Reiniciar</button>
  <label>Velocidad <select id="vel">
   <option value="1">×1 tiempo real</option><option value="3">×3</option><option value="5" selected>×5</option>
   <option value="10">×10</option><option value="20">×20</option><option value="40">×40</option></select></label>
- <div class="seg" id="modo"><button data-m="mapa">🗺️ Mapa</button><button data-m="ambos" class="on">Ambos</button><button data-m="tres">🧊 3D</button></div>
+ <div class="seg" id="modo"><button data-m="mapa">Mapa</button><button data-m="ambos" class="on">Ambos</button><button data-m="tres">3D</button></div>
  <span id="fases" style="font-size:12px;opacity:.85"></span><span id="reloj"></span>
 </div>
 <div id="vistas"><div id="mapa"></div><div id="tres"><div id="aviso3d">Cargando vista 3D…</div></div></div>
@@ -167,22 +167,22 @@ function tablero(){
     <span><i class="chip" style="background:${COLOR.recto}"></i>derecho ${g.recto}</span>
     <span><i class="chip" style="background:${COLOR.der}"></i>derecha ${g.der}</span>
     <span><i class="chip" style="background:${COLOR.cola}; border:1px solid #999"></i>en cola</span></div>`;
-  document.getElementById('reloj').textContent = '🕒 ' + hora(t);
+  document.getElementById('reloj').textContent = '' + hora(t);
 }
 function bucle(ahora){
   if (!corriendo) return;
   const dt = ultimo === null ? 0 : Math.min(0.1, (ahora - ultimo)/1000); ultimo = ahora;
   t += dt * Number(document.getElementById('vel').value);
-  if (t >= tFinal){ t = tFinal; corriendo = false; document.getElementById('play').textContent = '▶ Iniciar'; }
+  if (t >= tFinal){ t = tFinal; corriendo = false; document.getElementById('play').textContent = 'Iniciar'; }
   paso(dt);
   if (corriendo) requestAnimationFrame(bucle);
 }
 document.getElementById('play').onclick = () => { corriendo = !corriendo; ultimo = null;
-  document.getElementById('play').textContent = corriendo ? '⏸ Pausar' : '▶ Continuar';
+  document.getElementById('play').textContent = corriendo ? 'Pausar' : 'Continuar';
   if (corriendo) requestAnimationFrame(bucle); };
 document.getElementById('reset').onclick = () => { t = 0; corriendo = false; ultimo = null; X = D.semilla % 2147483647 || 1;
   S.forEach(s => { s.total = 0; s.ultimoCiclo = -1; s.salidos = 0; s.cola = []; s.moviendo = []; s.giros = {izq:0, recto:0, der:0}; });
-  document.getElementById('play').textContent = '▶ Iniciar'; paso(0); };
+  document.getElementById('play').textContent = 'Iniciar'; paso(0); };
 document.querySelectorAll('#modo button').forEach(b => b.onclick = () => {
   document.querySelectorAll('#modo button').forEach(x => x.classList.toggle('on', x === b));
   const m = b.dataset.m;
