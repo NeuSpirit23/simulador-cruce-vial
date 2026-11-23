@@ -27,4 +27,43 @@ class GeneradorCongruencial:
         return self.x / M
 
     def lista(self, cantidad: int) -> list[float]:
-        return [self.siguiente() for _ in range(cantidad)]
+        return self.arreglo(cantidad).tolist()
+
+    def arreglo(self, cantidad: int):
+        """Los siguientes `cantidad` números U como arreglo de numpy (misma secuencia que siguiente()).
+
+        Para ir rápido se usa que X(n+i) = (Aⁱ mod M) · X(n) mod M: con las potencias de A ya calculadas,
+        un bloque entero sale de una sola multiplicación. Aⁱ mod M y X(n) son menores que 2³¹, así que el
+        producto cabe en un entero de 64 bits y el resultado es exacto.
+        """
+        import numpy as np
+
+        cantidad = int(cantidad)
+        salida = np.empty(cantidad, dtype=np.float64)
+        pot = _potencias()
+        hecho = 0
+        while hecho < cantidad:
+            b = min(len(pot), cantidad - hecho)
+            xs = (pot[:b] * np.int64(self.x)) % M
+            salida[hecho:hecho + b] = xs / M
+            self.x = int(xs[-1])
+            hecho += b
+        return salida
+
+
+_POT = None
+
+
+def _potencias(bloque: int = 65_536):
+    """A¹, A², …, A^bloque (mod M), calculadas una sola vez."""
+    global _POT
+    if _POT is None:
+        import numpy as np
+
+        pot = np.empty(bloque, dtype=np.int64)
+        v = 1
+        for i in range(bloque):
+            v = (A * v) % M
+            pot[i] = v
+        _POT = pot
+    return _POT

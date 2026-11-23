@@ -46,8 +46,16 @@ def mil(x, dec=0):
     return f"{x:,.{dec}f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+MAX_FILAS_PANTALLA = 10_000
+
+
 def tabla(df, alto=None):
-    """Muestra una tabla con separador de miles '.', decimales ',' y fechas dd/mm/aaaa."""
+    """Muestra una tabla con separador de miles '.', decimales ',' y fechas dd/mm/aaaa.
+
+    Las tablas muy largas (periodos de meses o años) se recortan en pantalla para no saturar el navegador."""
+    total = len(df)
+    if total > MAX_FILAS_PANTALLA:
+        df = df.head(MAX_FILAS_PANTALLA)
     fmt = {}
     for c in df.columns:
         if pd.api.types.is_datetime64_any_dtype(df[c]):
@@ -62,6 +70,9 @@ def tabla(df, alto=None):
             fmt[c] = lambda v: mil(v)
     kw = {"height": alto} if alto else {}
     st.dataframe(df.style.format(fmt), use_container_width=True, hide_index=True, **kw)
+    if total > MAX_FILAS_PANTALLA:
+        st.caption(f"Se muestran las primeras {mil(MAX_FILAS_PANTALLA)} filas de {mil(total)}. Los totales y gráficos "
+                   "incluyen todo el periodo; el Excel trae hasta 10.000 filas de cada tabla de detalle.")
 
 
 # ---------------------------------------------------------------------------
@@ -193,16 +204,20 @@ if ciclos_estimados(semaforos, _esc) > MAX_CICLOS_TOTALES:
     st.markdown(_hero_simple, unsafe_allow_html=True)
     st.error(f"Son {mil(ciclos_estimados(semaforos, _esc))} ciclos a simular (ciclos × repeticiones). "
              f"El máximo es {mil(MAX_CICLOS_TOTALES)}. Reduzca el periodo, los ciclos, los números o las repeticiones.")
+    _por_rep = ciclos_estimados(semaforos, _esc) // max(1, repeticiones)
+    if _por_rep and MAX_CICLOS_TOTALES // _por_rep >= 1:
+        st.info(f"Con este periodo ({mil(_por_rep)} ciclos por repetición) puede usar hasta "
+                f"**{mil(MAX_CICLOS_TOTALES // _por_rep)} repeticiones**. Por ejemplo, un año completo admite 4.")
     st.stop()
 
 
 # --- Simulación y reportes: se recalculan solos con cada cambio --------------------------------
-@st.cache_data(show_spinner="Simulando…", max_entries=6)
+@st.cache_data(show_spinner="Simulando…", max_entries=3)
 def correr(inicio, fin, repeticiones, semilla, factor):
     return predecir(semaforos, EscenarioPrediccion(inicio, fin, repeticiones, semilla, factor))
 
 
-@st.cache_data(show_spinner="Armando los reportes…", max_entries=6)
+@st.cache_data(show_spinner="Armando los reportes…", max_entries=3)
 def armar(inicio, fin, repeticiones, semilla, factor, horas_bloque, ciclos_bloque):
     return construir(correr(inicio, fin, repeticiones, semilla, factor), semaforos, base, horas_bloque, ciclos_bloque)
 
@@ -225,11 +240,16 @@ def calcular_tramo(res_, cfg) -> dict:
     return {"descripcion": describir_tramo(cfg), "tabla": t, "ind": ind, "por_semaforo": por_sem}
 
 
-@st.cache_data(show_spinner="Preparando Excel y PDF…", max_entries=6)
-def archivos(inicio, fin, repeticiones, semilla, factor, horas_bloque, ciclos_bloque, tramo_cfg):
+@st.cache_data(show_spinner="Preparando el Excel…", max_entries=3)
+def archivo_excel(inicio, fin, repeticiones, semilla, factor, horas_bloque, ciclos_bloque, tramo_cfg):
     p = armar(inicio, fin, repeticiones, semilla, factor, horas_bloque, ciclos_bloque)
-    tramo = calcular_tramo(correr(inicio, fin, repeticiones, semilla, factor), tramo_cfg)
-    return excel_paquete(p, tramo), pdf_paquete(p, tramo)
+    return excel_paquete(p, calcular_tramo(correr(inicio, fin, repeticiones, semilla, factor), tramo_cfg))
+
+
+@st.cache_data(show_spinner="Preparando el PDF…", max_entries=3)
+def archivo_pdf(inicio, fin, repeticiones, semilla, factor, horas_bloque, ciclos_bloque, tramo_cfg):
+    p = armar(inicio, fin, repeticiones, semilla, factor, horas_bloque, ciclos_bloque)
+    return pdf_paquete(p, calcular_tramo(correr(inicio, fin, repeticiones, semilla, factor), tramo_cfg))
 
 
 args = (inicio, fin, repeticiones, semilla, factor)
@@ -239,7 +259,9 @@ pq = armar(*args, horas_bloque, ciclos_bloque)
 tramo_defecto = ("horas", tuple(SEMAFOROS), False, inicio, fin, 120, 1, 10, 10)
 _guardado = ss.get("tramo_export")
 tramo_cfg = _guardado[1] if _guardado and _guardado[0] == args else tramo_defecto
-xlsx, pdf = archivos(*args, horas_bloque, ciclos_bloque, tramo_cfg)
+clave_archivos = (*args, horas_bloque, ciclos_bloque, tramo_cfg)
+# Con periodos largos (más de ~2 días) el Excel y el PDF tardan: se preparan solo cuando se piden.
+ARCHIVOS_AL_PEDIR = 5_000
 T, K, G = pq.tablas, pq.kpis, pq.graficos
 nombre_bh = f"Bloques de {horas_bloque} h"
 nombre_bc = f"Bloques de {ciclos_bloque} ciclos"
@@ -254,16 +276,27 @@ st.markdown(hero("Simulador del cruce vial · vía Mesa–Girardot",
 
 
 def descargas():
-    """Los dos únicos botones de descarga de la app: el reporte completo en Excel y en PDF."""
+    """Los dos únicos botones de descarga de la app: el reporte completo en Excel y en PDF.
+
+    En simulaciones cortas los archivos ya están listos. En las largas (meses, años) cada botón dice primero
+    "Preparar…": al pulsarlo se arma ese archivo y el mismo botón pasa a "Descargar…"."""
+    grande = K["Ciclos"] > ARCHIVOS_AL_PEDIR
     c1, c2 = st.columns(2)
-    c1.download_button("Descargar Excel", xlsx, f"{archivo}.xlsx", key="desc_excel", type="primary",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                       use_container_width=True,
-                       help="Todas las hojas: resumen, conclusiones, bloques, por hora, por ciclo, mapa de calor, "
-                            "capacidad, validación, números pseudoaleatorios y datos de campo.")
-    c2.download_button("Descargar PDF", pdf, f"{archivo}.pdf", key="desc_pdf", type="primary",
-                       mime="application/pdf", use_container_width=True,
-                       help="El mismo reporte en PDF, con gráficos y tablas, listo para imprimir o entregar.")
+    for col, tipo, nombre, ext, mime, ayuda, fabricar in (
+            (c1, "excel", "Excel", "xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+             "Todas las hojas: resumen, conclusiones, bloques, por hora, por ciclo, mapa de calor, capacidad, "
+             "validación, números pseudoaleatorios y datos de campo.", archivo_excel),
+            (c2, "pdf", "PDF", "pdf", "application/pdf",
+             "El mismo reporte en PDF, con gráficos y tablas, listo para imprimir o entregar.", archivo_pdf)):
+        listo = not grande or ss.get(f"pedir_{tipo}") == clave_archivos
+        if listo:
+            col.download_button(f"Descargar {nombre}", fabricar(*clave_archivos), f"{archivo}.{ext}",
+                                key=f"desc_{tipo}", type="primary", mime=mime, use_container_width=True, help=ayuda)
+        elif col.button(f"Preparar {nombre}", key=f"prep_{tipo}", type="primary", use_container_width=True,
+                        help="Periodo largo: el archivo se arma al pulsar (puede tardar unos segundos). "
+                             "Luego este mismo botón lo descarga."):
+            ss[f"pedir_{tipo}"] = clave_archivos
+            st.rerun()
     st.caption(f"Los dos archivos traen el resumen ejecutivo, todos los reportes y el tramo del explorador: "
                f"{describir_tramo(tramo_cfg)}. Puede cambiarlo en Reportes → Explorador.")
 
@@ -280,12 +313,14 @@ def grafico_valle_pico():
 
 def grafico_horas(clave):
     hr = G["horas"]
-    fig = px.line(hr, x="hora", y=SEMAFOROS, markers=len(hr) < 80,
+    fig = px.line(hr, x="hora", y=SEMAFOROS, markers=len(hr) < 80, render_mode="webgl" if len(hr) > 5000 else "auto",
                   labels={"hora": "Hora", "value": "Vehículos por hora", "variable": "Semáforo"},
                   title="Vehículos que pasan por hora")
     fig.update_layout(legend_title_text="")
-    for x0, x1 in franjas_pico(inicio, fin):
-        fig.add_vrect(x0=x0, x1=x1, fillcolor=PICO, opacity=0.13, line_width=0)
+    # Franjas pico de una sola vez (add_vrect una por una tardaba minutos con un año: 730 franjas)
+    fig.update_layout(shapes=[dict(type="rect", xref="x", yref="paper", x0=x0, x1=x1, y0=0, y1=1, fillcolor=PICO,
+                                   opacity=0.13, line_width=0, layer="below")
+                              for x0, x1 in franjas_pico(inicio, fin)])
     st.plotly_chart(fig, use_container_width=True, key=f"horas_{clave}")
 
 
@@ -361,9 +396,18 @@ def explorador():
     st.markdown(kpis(tarjetas), unsafe_allow_html=True)
 
     eje = "Intervalo"
+    muchos = t["Intervalo"].nunique() > 300        # meses o años: líneas/áreas en vez de miles de barras
     if por_sem:
-        fig = px.bar(t, x=eje, y="Pasan (veh)", color="Semáforo", barmode="group",
-                     labels={"Pasan (veh)": "Vehículos que pasan"})
+        fig = (px.line if muchos else px.bar)(t, x=eje, y="Pasan (veh)", color="Semáforo",
+                                              labels={"Pasan (veh)": "Vehículos que pasan"},
+                                              **({} if muchos else {"barmode": "group"}))
+    elif muchos:
+        fig = go.Figure()
+        fig.add_scatter(name="En hora valle", x=t[eje], y=t["Pasan en valle"], stackgroup="a", line_width=0,
+                        fillcolor=VALLE, line_color=VALLE)
+        fig.add_scatter(name="En hora pico", x=t[eje], y=t["Pasan en pico"], stackgroup="a", line_width=0,
+                        fillcolor=PICO, line_color=PICO)
+        fig.update_layout(yaxis_title="Vehículos que pasan")
     else:
         fig = go.Figure()
         fig.add_bar(name="En hora valle", x=t[eje], y=t["Pasan en valle"], marker_color=VALLE)
@@ -549,8 +593,14 @@ with tabs[1]:
     st.markdown(seccion("", f"1 · Por bloques de {horas_bloque} h", pq.notas[nombre_bh]), unsafe_allow_html=True)
     b = G["bloques"]
     fig = go.Figure()
-    fig.add_bar(name="En hora valle", x=b["bloque"], y=b["en_valle"], marker_color=VALLE)
-    fig.add_bar(name="En hora pico", x=b["bloque"], y=b["en_pico"], marker_color=PICO)
+    if len(b) > 300:        # meses o años: áreas apiladas en vez de miles de barras
+        fig.add_scatter(name="En hora valle", x=b["bloque_ini"], y=b["en_valle"], stackgroup="a", line_width=0,
+                        fillcolor=VALLE, line_color=VALLE)
+        fig.add_scatter(name="En hora pico", x=b["bloque_ini"], y=b["en_pico"], stackgroup="a", line_width=0,
+                        fillcolor=PICO, line_color=PICO)
+    else:
+        fig.add_bar(name="En hora valle", x=b["bloque"], y=b["en_valle"], marker_color=VALLE)
+        fig.add_bar(name="En hora pico", x=b["bloque"], y=b["en_pico"], marker_color=PICO)
     fig.update_layout(barmode="stack", yaxis_title="Vehículos", height=380, margin=dict(t=30))
     st.plotly_chart(fig, use_container_width=True)
     tabla(T[nombre_bh])
@@ -562,6 +612,7 @@ with tabs[1]:
     st.markdown(seccion("", f"3 · Por bloques de {ciclos_bloque} ciclos", pq.notas[nombre_bc]), unsafe_allow_html=True)
     bc = G["bloques_ciclos"]
     fig = px.line(bc, x="desde", y="pasan", color="semaforo", markers=len(bc) < 200,
+                  render_mode="webgl" if len(bc) > 5000 else "auto",
                   labels={"desde": "Inicio del bloque", "pasan": f"Vehículos en {ciclos_bloque} ciclos",
                           "semaforo": "Semáforo"})
     st.plotly_chart(fig, use_container_width=True)
@@ -571,22 +622,30 @@ with tabs[1]:
     mc = T["Mapa de calor (día × hora)"]
     figm = px.imshow(mc, aspect="auto", color_continuous_scale="YlOrRd", labels=dict(x="Hora del día", y="Día", color="Vehículos"),
                      text_auto=".0f" if mc.size <= 24 * 8 else False)
-    figm.update_layout(height=max(260, 70 + 34 * len(mc)))
+    figm.update_layout(height=min(900, max(260, 70 + 34 * len(mc))))
     st.plotly_chart(figm, use_container_width=True)
 
     st.markdown(seccion("", "Diagramas de caja: vehículos que pasan por ciclo", pq.notas["Cajas"]), unsafe_allow_html=True)
     cic = G["ciclos"]
-    figb = px.box(cic, x="semaforo", y="pasan", color="periodo", category_orders={"periodo": ["Valle", "Pico"]},
-                  color_discrete_map={"Valle": VALLE, "Pico": PICO},
-                  labels={"semaforo": "Semáforo", "pasan": "Vehículos que pasan por ciclo", "periodo": ""})
-    figb.update_layout(height=380)
+    # Cajas calculadas aquí (cuartiles), no con todos los puntos: con meses o años de ciclos el navegador se bloqueaba
+    figb = go.Figure()
+    for per, color in (("Valle", VALLE), ("Pico", PICO)):
+        d = cic[cic["periodo"] == per]
+        if d.empty:
+            continue
+        q = d.groupby("semaforo")["pasan"].quantile([0, .25, .5, .75, 1]).unstack().reindex(SEMAFOROS).dropna()
+        figb.add_trace(go.Box(name=per, x=list(q.index), q1=q[0.25], median=q[0.5], q3=q[0.75],
+                              lowerfence=q[0.0], upperfence=q[1.0], marker_color=color, boxpoints=False))
+    figb.update_layout(boxmode="group", height=380, xaxis_title="Semáforo", yaxis_title="Vehículos que pasan por ciclo",
+                       legend_title_text="")
     st.plotly_chart(figb, use_container_width=True)
 
     st.markdown(seccion("", "Colas al final de cada verde", pq.notas["Colas"]), unsafe_allow_html=True)
     c1, c2 = st.columns([1.1, 1])
     with c1, st.container(border=True):
-        figh = px.histogram(cic, x="quedan", color="semaforo", barmode="group", nbins=int(max(5, cic["quedan"].max() + 1)),
-                            labels={"quedan": "Carros que quedan en cola", "semaforo": "Semáforo", "count": "Ciclos"})
+        cuenta = cic.groupby(["semaforo", "quedan"]).size().rename("Ciclos").reset_index()
+        figh = px.bar(cuenta, x="quedan", y="Ciclos", color="semaforo", barmode="group",
+                      labels={"quedan": "Carros que quedan en cola", "semaforo": "Semáforo"})
         figh.update_layout(height=340, yaxis_title="Ciclos", title="Histograma de colas")
         st.plotly_chart(figh, use_container_width=True)
     with c2:
@@ -599,21 +658,19 @@ with tabs[1]:
 
     st.markdown(seccion("", "6 · Números pseudoaleatorios: qué significa cada uno", pq.notas["Números pseudoaleatorios"]), unsafe_allow_html=True)
     nums = T["Números pseudoaleatorios"]
-    tabla(nums.head(20000), alto=460)
+    tabla(nums, alto=460)
     total_num = K["Números pseudoaleatorios"]
-    st.caption(f"Se muestran {mil(min(len(nums), 20000))} números de la repetición 1. En total la simulación usó "
-               f"{mil(total_num)} ({repeticiones} repeticiones). El Excel trae hasta {mil(len(nums))}.")
+    st.caption(f"Primeros números de la secuencia (repetición 1). En total la simulación usó {mil(total_num)} "
+               f"({repeticiones} repeticiones). El Excel trae hasta {mil(len(nums))}.")
 
     st.markdown(seccion("", "7 · Por ciclo (los 4 semáforos)", "Repetición 1 (U1, U2, llegadas, cola…) y el promedio de cada ciclo entre todas las repeticiones."), unsafe_allow_html=True)
     pc = T["Por ciclo"]
-    tabla(pc.head(20000), alto=420)
-    if len(pc) > 20000:
-        st.caption(f"Se muestran 20.000 de {mil(len(pc))} ciclos. El Excel tiene todos.")
+    tabla(pc, alto=420)
 
 # ---------------------------------------------------------------------------
 # 2b. Análisis: esquema y casos de prueba
 # ---------------------------------------------------------------------------
-@st.cache_data(show_spinner="Corriendo los casos de prueba…", max_entries=4)
+@st.cache_data(show_spinner="Corriendo los casos de prueba…", max_entries=2)
 def casos_prueba(inicio, fin, repeticiones, semilla, factor):
     return correr_casos(semaforos, EscenarioPrediccion(inicio, fin, repeticiones, semilla, factor),
                         correr(inicio, fin, repeticiones, semilla, factor))

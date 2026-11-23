@@ -121,6 +121,9 @@ def cubre_valle_y_pico(inicio: datetime, fin: datetime) -> tuple[bool, bool]:
     return hay_valle, hay_pico
 
 
+_NOMBRES_PERIODO = np.array(["Valle", "Pico"], dtype=object)
+
+
 def _tablas(valores: list[int]):
     t = tabla_intervalos(valores)
     return t["valor"].to_numpy(), t["hasta"].to_numpy()
@@ -173,7 +176,7 @@ def predecir(semaforos: dict[str, DatosSemaforo], esc: EscenarioPrediccion) -> R
             minuto_dia = (seg_inicio // 60).astype(np.int64) % 1440
             es_pico = es_minuto_pico(minuto_dia)
 
-            u = np.array(gen.lista(2 * n))
+            u = gen.arreglo(2 * n)
             usados += 2 * n
             u1, u2 = u[0::2], u[1::2]
 
@@ -188,11 +191,18 @@ def predecir(semaforos: dict[str, DatosSemaforo], esc: EscenarioPrediccion) -> R
             quedan = np.empty(n, dtype=np.int64)
             espera = np.empty(n, dtype=np.int64)
             cola = 0
+            ll, rz = lleg.tolist(), rez.tolist()        # listas de Python: el ciclo for va mucho más rápido
+            esp_l, pas_l, que_l = [0] * n, [0] * n, [0] * n
             for i in range(n):          # la cola depende del ciclo anterior
-                e = cola + int(lleg[i])
-                p = min(e - int(rez[i]), cap)
+                e = cola + ll[i]
+                p = e - rz[i]
+                if p > cap:
+                    p = cap
                 cola = e - p
-                espera[i], pasan[i], quedan[i] = e, p, cola
+                esp_l[i] = e
+                pas_l[i] = p
+                que_l[i] = cola
+            espera[:], pasan[:], quedan[:] = esp_l, pas_l, que_l
 
             # Totales por franja de 30 min (todas las repeticiones)
             horas_unicas, inv = np.unique(franja_abs, return_inverse=True)
@@ -217,8 +227,8 @@ def predecir(semaforos: dict[str, DatosSemaforo], esc: EscenarioPrediccion) -> R
             if rep == 1:
                 filas_detalle.append(pd.DataFrame({
                     "semaforo": s, "ciclo": k + 1,
-                    "inicio": [esc.inicio + pd.Timedelta(seconds=float(x)) for x in k * ciclo],
-                    "periodo": np.where(es_pico, "Pico", "Valle"),
+                    "inicio": pd.Timestamp(esc.inicio) + pd.to_timedelta(k * ciclo, unit="s"),
+                    "periodo": _NOMBRES_PERIODO[es_pico.astype(np.int8)],   # comparte 2 textos, no 1 por ciclo
                     "U1": u1, "llegadas": lleg, "en_espera": espera, "U2": u2,
                     "rezagados": rez, "capacidad": cap, "pasan": pasan, "quedan": quedan,
                 }))
@@ -228,13 +238,17 @@ def predecir(semaforos: dict[str, DatosSemaforo], esc: EscenarioPrediccion) -> R
 
     # Promedio de cada ciclo entre las R repeticiones
     ciclos = pd.concat(filas_detalle, ignore_index=True)
+    del filas_detalle
     r = esc.repeticiones
-    prom = []
-    for s, acc in acumulado.items():
-        media = acc["pasan"] / r
-        var = (acc["pasan2"] - r * media ** 2) / (r - 1) if r > 1 else np.zeros_like(media)
-        prom.append(pd.DataFrame({"semaforo": s, "ciclo": np.arange(1, len(media) + 1),
-                                  "pasan_prom": media, "pasan_var": np.maximum(var, 0),
-                                  "quedan_prom": acc["quedan"] / r, "llegadas_prom": acc["llegadas"] / r}))
-    ciclos = ciclos.merge(pd.concat(prom, ignore_index=True), on=["semaforo", "ciclo"])
+    # Promedios por ciclo: mismo orden que el detalle (semáforo por semáforo, ciclo 1, 2, …), así que se
+    # pegan como columnas sin un merge (que con un año de ciclos duplicaba la memoria).
+    orden = list(dict.fromkeys(ciclos["semaforo"]))
+    def col(f):
+        return np.concatenate([f(acumulado[s]) for s in orden])
+    media = col(lambda a: a["pasan"] / r)
+    suma2 = col(lambda a: a["pasan2"])
+    ciclos["pasan_prom"] = media
+    ciclos["pasan_var"] = np.maximum((suma2 - r * media ** 2) / (r - 1), 0) if r > 1 else 0.0
+    ciclos["quedan_prom"] = col(lambda a: a["quedan"] / r)
+    ciclos["llegadas_prom"] = col(lambda a: a["llegadas"] / r)
     return ResultadoPrediccion(esc, ciclos, horas, usados, pd.DataFrame(info))

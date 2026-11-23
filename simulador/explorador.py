@@ -21,22 +21,6 @@ def _etiqueta(ini: pd.Timestamp, fin: pd.Timestamp, varios_dias: bool) -> str:
     return (ini.strftime("%d/%m %H:%M") if varios_dias else ini.strftime("%H:%M")) + "–" + fin_txt
 
 
-def _resumir(g: pd.DataFrame) -> pd.Series:
-    pasan = g["pasan_prom"].sum()
-    pico = g.loc[g["periodo"] == "Pico", "pasan_prom"].sum()
-    return pd.Series({
-        "Inicia": g["inicio"].min(),
-        "Ciclos": int(len(g)),
-        "Llegan (veh)": g["llegadas_prom"].sum(),
-        "Pasan (veh)": pasan,
-        "Pasan en valle": pasan - pico,
-        "Pasan en pico": pico,
-        "% en pico": 100 * pico / pasan if pasan else 0.0,
-        "Quedan prom. (veh/ciclo)": g["quedan_prom"].mean(),
-        "Cola máx. (veh, rep. 1)": g["quedan"].max(),
-    })
-
-
 def explorar(ciclos: pd.DataFrame, modo: str, semaforos: list[str], *, desde=None, hasta=None,
              frecuencia_min: int = 120, ciclo_desde: int = 1, ciclo_hasta: int = 10, cada_ciclos: int = 10,
              por_semaforo: bool = False) -> tuple[pd.DataFrame, dict]:
@@ -52,20 +36,30 @@ def explorar(ciclos: pd.DataFrame, modo: str, semaforos: list[str], *, desde=Non
         paso = pd.Timedelta(minutes=frecuencia_min)
         dia = c["inicio"].dt.normalize()
         c["_ini"] = dia + ((c["inicio"] - dia) // paso) * paso
-        c["_fin"] = c["_ini"] + paso
         varios = c["inicio"].dt.date.nunique() > 1 if len(c) else False
-        c["Intervalo"] = [_etiqueta(a, b, varios) for a, b in zip(c["_ini"], c["_fin"])]
+        unicos = c["_ini"].drop_duplicates()
+        nombres = {a: _etiqueta(a, a + paso, varios) for a in unicos}   # una etiqueta por intervalo, no por ciclo
+        c["Intervalo"] = c["_ini"].map(nombres)
         claves = ["_ini", "Intervalo"]
     else:
         c = c[(c["ciclo"] >= ciclo_desde) & (c["ciclo"] <= ciclo_hasta)]
         c["_ini"] = ciclo_desde + ((c["ciclo"] - ciclo_desde) // cada_ciclos) * cada_ciclos
-        c["Intervalo"] = [f"Ciclos {a}–{min(a + cada_ciclos - 1, ciclo_hasta)}" for a in c["_ini"]]
+        nombres = {a: f"Ciclos {a}–{min(a + cada_ciclos - 1, ciclo_hasta)}" for a in c["_ini"].unique()}
+        c["Intervalo"] = c["_ini"].map(nombres)
         claves = ["_ini", "Intervalo"]
     if por_semaforo:
         claves = claves + ["semaforo"]
     if c.empty:
         return pd.DataFrame(), {}
-    t = c.groupby(claves, sort=True).apply(_resumir, include_groups=False).reset_index()
+    c["_pico"] = c["pasan_prom"].where(c["periodo"] == "Pico", 0.0)
+    t = c.groupby(claves, sort=True).agg(**{
+        "Inicia": ("inicio", "min"), "Ciclos": ("ciclo", "size"), "Llegan (veh)": ("llegadas_prom", "sum"),
+        "Pasan (veh)": ("pasan_prom", "sum"), "Pasan en pico": ("_pico", "sum"),
+        "Quedan prom. (veh/ciclo)": ("quedan_prom", "mean"), "Cola máx. (veh, rep. 1)": ("quedan", "max"),
+    }).reset_index()
+    t.insert(t.columns.get_loc("Pasan en pico"), "Pasan en valle", t["Pasan (veh)"] - t["Pasan en pico"])
+    t.insert(t.columns.get_loc("Pasan en pico") + 1, "% en pico",
+             (100 * t["Pasan en pico"] / t["Pasan (veh)"].where(t["Pasan (veh)"] != 0)).fillna(0.0))
     if modo == "horas":
         horas = frecuencia_min / 60
         t["Veh/h"] = t["Pasan (veh)"] / horas

@@ -147,3 +147,11 @@ def test_visor_funciona_sin_internet():
     from simulador.visor import _librerias
     lib = _librerias()
     assert "Leaflet" in lib["__LEAFLET_JS__"] and "data:text/javascript;base64," in lib["__IMPORTMAP__"]
+
+
+def test_generador_rapido_igual_al_original():
+    from simulador.generador import GeneradorCongruencial
+    a, b = GeneradorCongruencial(12345), GeneradorCongruencial(12345)
+    lenta = [a.siguiente() for _ in range(70_000)]          # cruza el borde de un bloque de potencias
+    rapida = b.arreglo(70_000).tolist()
+    assert lenta == rapida and a.x == b.x

@@ -55,7 +55,8 @@ def _por_semaforo_y_periodo(res: ResultadoPrediccion) -> pd.DataFrame:
     return pd.DataFrame(filas)
 
 
-MAX_NUMEROS_REPORTE = 200_000
+MAX_NUMEROS_REPORTE = 10_000          # filas de la secuencia que se muestran/exportan
+MAX_CICLOS_DETALLE = 2_500            # ciclos por semáforo en la tabla 'Por ciclo' (los totales usan todos)
 
 
 def secuencia_numeros(res: ResultadoPrediccion, semaforos: dict[str, DatosSemaforo],
@@ -68,9 +69,17 @@ def secuencia_numeros(res: ResultadoPrediccion, semaforos: dict[str, DatosSemafo
     X(n) = 16807 · X(n−1) mod 2147483647   y   U = X(n) ÷ 2147483647
     """
     e = res.escenario
-    orden = {s: i for i, s in enumerate(SEMAFOROS)}
-    c = res.ciclos.assign(_o=res.ciclos["semaforo"].map(orden)).sort_values(["_o", "ciclo"])
-    c = c.head((max_filas + 1) // 2).reset_index(drop=True)
+    # Solo los primeros ciclos en el orden en que se generaron (S1 completo, luego S2…): se toman por semáforo
+    # sin ordenar toda la tabla, que con un año de ciclos ocupaba cientos de MB.
+    falta = (max_filas + 1) // 2
+    partes = []
+    for s in SEMAFOROS:
+        if falta <= 0:
+            break
+        parte = res.ciclos[res.ciclos["semaforo"] == s].sort_values("ciclo").head(falta)
+        partes.append(parte)
+        falta -= len(parte)
+    c = pd.concat(partes, ignore_index=True)
 
     # Secuencia X(n) desde la semilla
     n_num = 2 * len(c)
@@ -423,7 +432,8 @@ def construir(res: ResultadoPrediccion, semaforos: dict[str, DatosSemaforo], bas
     t["Capacidad"] = cap
     t["Validación"] = _validacion(semaforos, base, e.semilla)
 
-    t["Por ciclo"] = res.ciclos.drop(columns=["pasan_var"]).rename(columns={
+    t["Por ciclo"] = res.ciclos.groupby("semaforo", sort=False).head(MAX_CICLOS_DETALLE).drop(
+        columns=["pasan_var"]).reset_index(drop=True).rename(columns={
         "semaforo": "Semáforo", "ciclo": "Ciclo", "inicio": "Inicio del ciclo", "periodo": "Periodo",
         "llegadas": "Llegadas", "en_espera": "En espera", "rezagados": "Rezagados", "capacidad": "Capacidad",
         "pasan": "Pasan", "quedan": "Quedan", "pasan_prom": "Pasan (prom. repeticiones)",

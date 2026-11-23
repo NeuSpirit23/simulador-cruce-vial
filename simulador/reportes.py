@@ -8,6 +8,8 @@ repetición se agrega el intervalo de confianza del 99 %:
 
 import math
 
+import numpy as np
+
 import pandas as pd
 
 from .datos import SEMAFOROS
@@ -128,21 +130,24 @@ def reporte_bloques_ciclos(res: ResultadoPrediccion, ciclos_bloque: int = 10) ->
 
     Pasan = suma de los vehículos que pasan en esos N ciclos (promedio de las repeticiones).
     """
-    c = res.ciclos.copy()
+    c = res.ciclos[["semaforo", "ciclo", "inicio", "periodo", "pasan_prom", "pasan_var", "llegadas_prom",
+                    "quedan_prom"]].copy()
     c["grupo"] = (c["ciclo"] - 1) // ciclos_bloque
+    c["es_pico"] = (c["periodo"] == "Pico").astype(int)
     r = res.escenario.repeticiones
-    g = c.groupby(["semaforo", "grupo"])
+    g = c.groupby(["semaforo", "grupo"], sort=True)
     out = g.agg(ciclo_desde=("ciclo", "min"), ciclo_hasta=("ciclo", "max"),
                 desde=("inicio", "min"), hasta=("inicio", "max"),
                 pasan=("pasan_prom", "sum"), var=("pasan_var", "sum"),
                 llegadas=("llegadas_prom", "sum"), cola_prom=("quedan_prom", "mean"),
-                ciclos_pico=("periodo", lambda x: int((x == "Pico").sum()))).reset_index()
+                ciclos_pico=("es_pico", "sum")).reset_index()
     out["ciclos"] = out["ciclo_hasta"] - out["ciclo_desde"] + 1
     out["ic"] = Z * (out["var"] ** 0.5) / math.sqrt(r) if r > 1 else 0.0
     out["prom_por_ciclo"] = out["pasan"] / out["ciclos"]
     out["pct_del_semaforo"] = 100 * out["pasan"] / out.groupby("semaforo")["pasan"].transform("sum")
     out["ciclos"] = out["ciclo_desde"].astype(str) + "–" + out["ciclo_hasta"].astype(str)
-    out["periodo"] = out.apply(lambda x: "Pico" if x["ciclos_pico"] == x["ciclo_hasta"] - x["ciclo_desde"] + 1
-                               else ("Valle" if x["ciclos_pico"] == 0 else "Valle y pico"), axis=1)
+    n_ciclos = out["ciclo_hasta"] - out["ciclo_desde"] + 1
+    out["periodo"] = np.select([out["ciclos_pico"] == n_ciclos, out["ciclos_pico"] == 0], ["Pico", "Valle"],
+                               default="Valle y pico")
     return out[["semaforo", "ciclos", "desde", "hasta", "periodo", "pasan", "ic", "pct_del_semaforo",
                 "prom_por_ciclo", "llegadas", "cola_prom"]]

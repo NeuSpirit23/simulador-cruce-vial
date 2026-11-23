@@ -34,7 +34,8 @@ GRIS = "F2F2F2"
 COLOR_VALLE = "#5B8DB8"
 COLOR_PICO = "#E07B39"
 COLORES_SEM = {"S1": "#2E86AB", "S2": "#E07B39", "S3": "#3BB273", "S4": "#C73E1D"}
-MAX_FILAS_EXCEL = 1_000_000
+MAX_FILAS_EXCEL = 10_000      # filas máximas de las hojas de detalle (por ciclo, números, bloques de ciclos)
+FILAS_CON_ESTILO = 3_000      # en tablas más largas solo se aplica el formato de número (mucho más rápido)
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +104,7 @@ def _tabla_excel(ws, df: pd.DataFrame, fila: int, col: int = 1, titulo: str | No
     ws.row_dimensions[fila].height = 32
     formatos = [_formato_excel(n, df[n]) for n in df.columns]
     cebra = PatternFill("solid", fgColor=GRIS)
+    con_estilo = len(df) <= FILAS_CON_ESTILO
     for i, fila_datos in enumerate(df.itertuples(index=False), start=1):
         for j, v in enumerate(fila_datos):
             if isinstance(v, pd.Timestamp):
@@ -110,11 +112,12 @@ def _tabla_excel(ws, df: pd.DataFrame, fila: int, col: int = 1, titulo: str | No
             elif hasattr(v, "item"):
                 v = v.item()
             c = ws.cell(fila + i, col + j, v)
-            c.border = _borde
             if formatos[j]:
                 c.number_format = formatos[j]
-            if i % 2 == 0:
-                c.fill = cebra
+            if con_estilo:
+                c.border = _borde
+                if i % 2 == 0:
+                    c.fill = cebra
     ultima = fila + len(df)
     if filtro and len(df):
         ws.auto_filter.ref = f"{get_column_letter(col)}{fila}:{get_column_letter(col + len(df.columns) - 1)}{ultima}"
@@ -283,7 +286,10 @@ def excel_paquete(p: Paquete, tramo: dict | None = None) -> bytes:
     ws = wb.create_sheet(nombre_c)
     ws.sheet_view.showGridLines = False
     f = _titulo(ws, f"Vehículos que pasan por {nombre_c.lower()}", 1, p.notas[nombre_c])
-    _tabla_excel(ws, t[nombre_c], f, filtro=True)
+    _tabla_excel(ws, t[nombre_c].head(MAX_FILAS_EXCEL), f, filtro=True)
+    if len(t[nombre_c]) > MAX_FILAS_EXCEL:
+        ws.cell(f - 1, 1, f"Se muestran los primeros {MAX_FILAS_EXCEL:,} bloques de {len(t[nombre_c]):,}; los totales "
+                          "de las otras hojas incluyen todo el periodo.".replace(",", "."))
     _anchos(ws)
 
     # --- Mapa de calor, colas y prueba de ajuste --------------------------------
@@ -337,7 +343,7 @@ def excel_paquete(p: Paquete, tramo: dict | None = None) -> bytes:
     ws.merge_cells(start_row=f - 1, start_column=1, end_row=f - 1, end_column=13)
     ws.row_dimensions[f - 1].height = 75
     nums = t["Números pseudoaleatorios"]
-    _tabla_excel(ws, nums, f + 1, filtro=True)
+    _tabla_excel(ws, nums.head(MAX_FILAS_EXCEL), f + 1, filtro=True)
     _anchos(ws, maximo=60)
     ws.column_dimensions["D"].width = 18
     ws.freeze_panes = f"A{f + 2}"
@@ -345,7 +351,9 @@ def excel_paquete(p: Paquete, tramo: dict | None = None) -> bytes:
     # --- Por ciclo --------------------------------------------------------------
     ws = wb.create_sheet("Por ciclo")
     f = _titulo(ws, "Detalle por ciclo", 1, "Repetición 1 (U1, U2, llegadas, cola) y promedio de cada ciclo "
-                                         "entre todas las repeticiones.")
+                                         "entre todas las repeticiones."
+                + (f" Periodo largo: se muestran los primeros {MAX_FILAS_EXCEL:,} ciclos; los totales de las otras "
+                   "hojas incluyen todo el periodo.".replace(",", ".") if len(t["Por ciclo"]) > MAX_FILAS_EXCEL else ""))
     _tabla_excel(ws, t["Por ciclo"].head(MAX_FILAS_EXCEL), f, filtro=True)
     _anchos(ws)
     ws.column_dimensions["C"].width = 18
@@ -470,6 +478,21 @@ _GRANDE = ParagraphStyle("grande", parent=_est["BodyText"], fontSize=11.5, leadi
                          textColor=colors.HexColor("#1d3b5a"))
 
 
+
+def _apiladas(ax, xs, valle, pico):
+    """Barras apiladas valle + pico. Con muchos intervalos (meses o años) se dibujan como áreas, que se ven
+    igual de claras y no hacen que el PDF tarde minutos."""
+    valle, pico = list(valle), list(pico)
+    if len(xs) <= 120:
+        ax.bar(xs, valle, label="En hora valle", color=COLOR_VALLE)
+        ax.bar(xs, pico, bottom=valle, label="En hora pico", color=COLOR_PICO)
+    else:
+        tope = [a + b for a, b in zip(valle, pico)]
+        ax.fill_between(xs, 0, valle, step="mid", color=COLOR_VALLE, label="En hora valle", lw=0)
+        ax.fill_between(xs, valle, tope, step="mid", color=COLOR_PICO, label="En hora pico", lw=0)
+        ax.set_xlim(xs[0], xs[-1])
+
+
 def _tarjetas_pdf(items, ancho, alto=2.4):
     """Fila de tarjetas grandes: [(título, valor, detalle, color hex)]."""
     celdas = [Paragraph(f"<font size=8 color='#595959'>{t}</font><br/>"
@@ -553,8 +576,7 @@ def _seccion_tramo(tramo: dict, W) -> list:
     if not tramo["por_semaforo"]:
         fig, ax = plt.subplots(figsize=(13, 3.4))
         xs = list(range(len(tab)))
-        ax.bar(xs, tab["Pasan en valle"], label="En hora valle", color=COLOR_VALLE)
-        ax.bar(xs, tab["Pasan en pico"], bottom=tab["Pasan en valle"], label="En hora pico", color=COLOR_PICO)
+        _apiladas(ax, xs, tab["Pasan en valle"], tab["Pasan en pico"])
         paso = max(1, len(tab) // 30)
         ax.set_xticks(xs[::paso])
         ax.set_xticklabels(tab["Intervalo"].tolist()[::paso], rotation=45, fontsize=7, ha="right")
@@ -567,8 +589,11 @@ def _seccion_tramo(tramo: dict, W) -> list:
         fig, ax = plt.subplots(figsize=(13, 3.4))
         n = len(piv.columns)
         for j, s_ in enumerate(piv.columns):
-            ax.bar([i + (j - (n - 1) / 2) * 0.8 / n for i in range(len(piv))], piv[s_], 0.8 / n, label=s_,
-                   color=COLORES_SEM.get(s_))
+            if len(piv) > 120:      # muchos intervalos: líneas en vez de barras
+                ax.plot(range(len(piv)), piv[s_], label=s_, color=COLORES_SEM.get(s_), lw=1)
+            else:
+                ax.bar([i + (j - (n - 1) / 2) * 0.8 / n for i in range(len(piv))], piv[s_], 0.8 / n, label=s_,
+                       color=COLORES_SEM.get(s_))
         paso = max(1, len(piv) // 30)
         ax.set_xticks(list(range(len(piv)))[::paso])
         ax.set_xticklabels(piv.index.tolist()[::paso], rotation=45, fontsize=7, ha="right")
@@ -650,8 +675,7 @@ def pdf_paquete(p: Paquete, tramo: dict | None = None) -> bytes:
     h.append(Paragraph(p.notas[nombre_b], _NOTA))
     fig, ax = plt.subplots(figsize=(13, 3.8))
     xs = list(range(len(b)))
-    ax.bar(xs, b["en_valle"], label="En hora valle", color=COLOR_VALLE)
-    ax.bar(xs, b["en_pico"], bottom=b["en_valle"], label="En hora pico", color=COLOR_PICO)
+    _apiladas(ax, xs, b["en_valle"], b["en_pico"])
     paso = max(1, len(b) // 30)
     ax.set_xticks(xs[::paso])
     ax.set_xticklabels(b["bloque_ini"].dt.strftime("%d/%m %H:%M").tolist()[::paso], rotation=55, fontsize=7, ha="right")
